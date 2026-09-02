@@ -1,0 +1,6 @@
+{
+  "name": "Invoice Management & Generator",
+  "description": "Professional Invoice Management and Generator system with vendor directory, custom Quebec & HST tax calculations, and master template PDF generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

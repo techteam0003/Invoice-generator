@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "vendors": {
+      "title": "Vendor",
+      "description": "Vendors and dealerships billed for automotive sourcing services",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "companyName", "address", "createdAt"]
+    },
+    "invoices": {
+      "title": "Invoice",
+      "description": "Generated invoices with line items, tax breakdowns, and payment status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "invoiceDate": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "vendorId": { "type": "string" },
+        "vendor": {
+          "type": "object",
+          "properties": {
+            "companyName": { "type": "string" },
+            "address": { "type": "string" },
+            "phone": { "type": "string" },
+            "email": { "type": "string" }
+          }
+        },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "taxType": { "type": "string" },
+        "taxRate": { "type": "number" },
+        "taxAmount": { "type": "number" },
+        "taxBreakdown": { "type": "object" },
+        "grandTotal": { "type": "number" },
+        "status": { "type": "string" },
+        "paymentDate": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "invoiceNumber", "invoiceDate", "vendorId", "vendor", "items", "subtotal", "taxType", "taxRate", "taxAmount", "grandTotal", "status", "createdAt"]
+    },
+    "tax_config": {
+      "title": "Tax Configuration",
+      "description": "System-wide default tax configuration settings",
+      "type": "object",
+      "properties": {
+        "defaultTaxType": { "type": "string" },
+        "hstRate": { "type": "number" },
+        "customTaxRate": { "type": "number" },
+        "quebecGstRate": { "type": "number" },
+        "quebecQstRate": { "type": "number" }
+      }
+    }
+  }
+}
