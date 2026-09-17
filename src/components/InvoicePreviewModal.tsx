@@ -8,7 +8,8 @@ import {
   Trash2,
   FileText,
   Share2,
-  AlertCircle
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { Invoice } from '../types';
 import { MasterInvoiceSheet } from './MasterInvoiceSheet';
@@ -21,6 +22,7 @@ interface InvoicePreviewModalProps {
   onClose: () => void;
   onMarkAsPaid: (invoiceId: string, paymentDate?: string) => void;
   onMarkAsOpen: (invoiceId: string) => void;
+  onEditInvoice?: (invoice: Invoice) => void;
   onDeleteInvoice?: (invoiceId: string) => void;
 }
 
@@ -29,6 +31,7 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
   onClose,
   onMarkAsPaid,
   onMarkAsOpen,
+  onEditInvoice,
   onDeleteInvoice,
 }) => {
   const [isDownloading, setIsDownloading] = useState(false);
@@ -129,6 +132,22 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
                 </>
               )}
             </button>
+
+            {/* Edit Invoice */}
+            {onEditInvoice && (
+              <button
+                onClick={() => {
+                  onEditInvoice(invoice);
+                  onClose();
+                }}
+                id="modal-edit-invoice-btn"
+                title="Edit and Update Invoice"
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Edit</span>
+              </button>
+            )}
 
             {/* Delete Invoice */}
             {onDeleteInvoice && (

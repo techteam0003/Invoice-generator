@@ -13,7 +13,8 @@ import {
   ArrowUpDown,
   Plus,
   FileSpreadsheet,
-  AlertCircle
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { Invoice, Vendor } from '../types';
 import { formatCurrency, formatDateToDisplay } from '../utils/formatters';
@@ -27,6 +28,7 @@ interface InvoiceListViewProps {
   statusFilterPreset?: 'ALL' | 'OPEN' | 'PAID';
   onViewInvoice: (invoice: Invoice) => void;
   onDownloadInvoice: (invoice: Invoice) => void;
+  onEditInvoice?: (invoice: Invoice) => void;
   onMarkAsPaid: (invoiceId: string, paymentDate?: string) => void;
   onMarkAsOpen: (invoiceId: string) => void;
   onDeleteInvoice: (invoiceId: string) => void;
@@ -41,6 +43,7 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
   statusFilterPreset = 'ALL',
   onViewInvoice,
   onDownloadInvoice,
+  onEditInvoice,
   onMarkAsPaid,
   onMarkAsOpen,
   onDeleteInvoice,
@@ -331,6 +334,16 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+
+                        {onEditInvoice && (
+                          <button
+                            onClick={() => onEditInvoice(inv)}
+                            title="Edit Invoice"
+                            className="p-1.5 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded transition cursor-pointer"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        )}
 
                         <button
                           onClick={() => onDownloadInvoice(inv)}

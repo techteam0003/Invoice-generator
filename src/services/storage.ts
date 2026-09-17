@@ -442,7 +442,7 @@ export const storage = {
     invoices[index] = updated;
     localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
-    updateDoc(doc(db, COLLECTIONS.INVOICES, id), cleanForFirestore(updates)).catch((error) => {
+    setDoc(doc(db, COLLECTIONS.INVOICES, id), cleanForFirestore(updated), { merge: true }).catch((error) => {
       console.error('Error updating invoice in Firestore:', error);
     });
 

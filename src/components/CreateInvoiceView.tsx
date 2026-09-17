@@ -13,9 +13,13 @@ import {
   Sparkles,
   Car,
   ChevronRight,
-  Layers
+  Layers,
+  Edit3,
+  Save,
+  XCircle,
+  Clock
 } from 'lucide-react';
-import { Invoice, InvoiceItem, Vendor, TaxType, TaxConfig } from '../types';
+import { Invoice, InvoiceItem, InvoiceStatus, Vendor, TaxType, TaxConfig } from '../types';
 import { MasterInvoiceSheet } from './MasterInvoiceSheet';
 import { getTodayDateString, formatDateToDisplay, formatRawAmount, formatCurrency } from '../utils/formatters';
 
@@ -23,25 +27,37 @@ interface CreateInvoiceViewProps {
   vendors: Vendor[];
   taxConfig: TaxConfig;
   initialVendor?: Vendor | null;
+  editingInvoice?: Invoice | null;
   onSaveInvoice: (invoiceData: Omit<Invoice, 'id' | 'createdAt'>) => Invoice | null;
+  onUpdateInvoice?: (id: string, invoiceData: Partial<Invoice>) => Invoice | null;
+  onCancelEdit?: () => void;
   onOpenVendorModal: () => void;
-  isInvoiceNumberTaken: (num: string) => boolean;
+  isInvoiceNumberTaken: (num: string, excludeId?: string) => boolean;
   onInvoiceCreated: (invoice: Invoice) => void;
+  onInvoiceUpdated?: (invoice: Invoice) => void;
 }
 
 export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
   vendors,
   taxConfig,
   initialVendor,
+  editingInvoice,
   onSaveInvoice,
+  onUpdateInvoice,
+  onCancelEdit,
   onOpenVendorModal,
   isInvoiceNumberTaken,
   onInvoiceCreated,
+  onInvoiceUpdated,
 }) => {
   // 1. Manual Invoice Number & Meta
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(getTodayDateString());
   const [dueDate, setDueDate] = useState('Net 7 days');
+
+  // Status & Payment Date (especially for editing)
+  const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus>('OPEN');
+  const [paymentDate, setPaymentDate] = useState<string>('');
 
   // 2. Vendor Selection & Bill To
   const [selectedVendorId, setSelectedVendorId] = useState<string>('');
@@ -69,23 +85,68 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
   const [activeViewMode, setActiveViewMode] = useState<'editor' | 'preview' | 'split'>('editor');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Auto select initial vendor if provided
+  // Populate or reset form fields when editingInvoice or defaults change
   useEffect(() => {
-    if (initialVendor) {
-      setSelectedVendorId(initialVendor.id);
-    } else if (vendors.length > 0 && !selectedVendorId) {
-      setSelectedVendorId(vendors[0].id);
+    if (editingInvoice) {
+      setInvoiceNumber(editingInvoice.invoiceNumber || '');
+      setInvoiceDate(editingInvoice.invoiceDate || getTodayDateString());
+      setDueDate(editingInvoice.dueDate || 'Net 7 days');
+      setInvoiceStatus(editingInvoice.status || 'OPEN');
+      setPaymentDate(editingInvoice.paymentDate || '');
+      setSelectedVendorId(editingInvoice.vendorId || '');
+      setTaxType(editingInvoice.taxType || 'HST');
+      setCustomTaxRate(editingInvoice.taxRate || 13.0);
+      setItems(
+        editingInvoice.items && editingInvoice.items.length > 0
+          ? editingInvoice.items.map((it) => ({ ...it }))
+          : [
+              {
+                id: 'item_' + Date.now(),
+                title: 'Vehicle Sourcing/Locating Service Fee',
+                subDetails: '',
+                quantity: 1,
+                rate: 400.0,
+                amount: 400.0,
+              },
+            ]
+      );
+      setNotes(editingInvoice.notes || '');
+      setFormError(null);
+    } else {
+      if (initialVendor) {
+        setSelectedVendorId(initialVendor.id);
+      } else if (vendors.length > 0 && !selectedVendorId) {
+        setSelectedVendorId(vendors[0].id);
+      }
+      setInvoiceStatus('OPEN');
+      setPaymentDate('');
+      if (!invoiceNumber) {
+        const yearSuffix = new Date().getFullYear().toString().slice(-2);
+        const randomNum = Math.floor(1000 + Math.random() * 9000);
+        setInvoiceNumber(`AR${yearSuffix}-${randomNum}`);
+      }
     }
-  }, [initialVendor, vendors, selectedVendorId]);
+  }, [editingInvoice]);
 
-  // Auto-generate a sensible initial suggestion for manual invoice number (e.g. AR26-0813)
+  // Handle vendor auto-selection for new invoices
   useEffect(() => {
-    if (!invoiceNumber) {
+    if (!editingInvoice) {
+      if (initialVendor) {
+        setSelectedVendorId(initialVendor.id);
+      } else if (vendors.length > 0 && !selectedVendorId) {
+        setSelectedVendorId(vendors[0].id);
+      }
+    }
+  }, [initialVendor, vendors, selectedVendorId, editingInvoice]);
+
+  // Auto-generate a sensible initial suggestion for manual invoice number for new invoices
+  useEffect(() => {
+    if (!editingInvoice && !invoiceNumber) {
       const yearSuffix = new Date().getFullYear().toString().slice(-2);
       const randomNum = Math.floor(1000 + Math.random() * 9000);
       setInvoiceNumber(`AR${yearSuffix}-${randomNum}`);
     }
-  }, [invoiceNumber]);
+  }, [invoiceNumber, editingInvoice]);
 
   // Current selected vendor object
   const selectedVendor = useMemo(() => {
@@ -168,7 +229,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
   // Draft invoice for live preview
   const draftInvoice: Invoice = useMemo(() => {
     return {
-      id: 'draft-preview',
+      id: editingInvoice ? editingInvoice.id : 'draft-preview',
       invoiceNumber: invoiceNumber.trim() || 'AR26-DRAFT',
       invoiceDate: invoiceDate,
       dueDate: dueDate,
@@ -187,14 +248,18 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
       qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
       grandTotal,
-      status: 'OPEN',
-      createdAt: new Date().toISOString(),
+      status: invoiceStatus,
+      paymentDate: invoiceStatus === 'PAID' ? (paymentDate || invoiceDate) : undefined,
+      createdAt: editingInvoice ? editingInvoice.createdAt : new Date().toISOString(),
       notes,
     };
   }, [
+    editingInvoice,
     invoiceNumber,
     invoiceDate,
     dueDate,
+    invoiceStatus,
+    paymentDate,
     selectedVendorId,
     selectedVendor,
     items,
@@ -208,7 +273,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     notes,
   ]);
 
-  // Validation and Generation
+  // Validation and Generation / Updating
   const handleGenerateInvoice = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -219,7 +284,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       return;
     }
 
-    if (isInvoiceNumberTaken(cleanNumber)) {
+    if (isInvoiceNumberTaken(cleanNumber, editingInvoice?.id)) {
       setFormError(`Invoice Number "${cleanNumber}" is already in use. Please enter a unique invoice number.`);
       return;
     }
@@ -250,40 +315,74 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       }
     }
 
-    // Prepare clean invoice payload with default OPEN status
-    const invoiceData: Omit<Invoice, 'id' | 'createdAt'> = {
-      invoiceNumber: cleanNumber,
-      invoiceDate: invoiceDate,
-      dueDate: dueDate,
-      vendorId: selectedVendor.id,
-      vendor: {
-        companyName: selectedVendor.companyName,
-        address: selectedVendor.address,
-        phone: selectedVendor.phone,
-        email: selectedVendor.email,
-      },
-      items: items.map((item) => ({
-        id: item.id,
-        title: item.title.trim(),
-        subDetails: item.subDetails?.trim() || undefined,
-        quantity: Number(item.quantity),
-        rate: Number(item.rate),
-        amount: Math.round(Number(item.quantity) * Number(item.rate) * 100) / 100,
-      })),
-      subtotal,
-      taxType,
-      taxRate: effectiveTaxRate,
-      taxAmount,
-      gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
-      qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
-      grandTotal,
-      status: 'OPEN', // Default OPEN status
-      notes: notes.trim() || undefined,
-    };
+    // Prepare clean invoice payload
+    const processedItems = items.map((item) => ({
+      id: item.id,
+      title: item.title.trim(),
+      subDetails: item.subDetails?.trim() || undefined,
+      quantity: Number(item.quantity),
+      rate: Number(item.rate),
+      amount: Math.round(Number(item.quantity) * Number(item.rate) * 100) / 100,
+    }));
 
-    const created = onSaveInvoice(invoiceData);
-    if (created) {
-      onInvoiceCreated(created);
+    if (editingInvoice && onUpdateInvoice) {
+      const updatedData: Partial<Invoice> = {
+        invoiceNumber: cleanNumber,
+        invoiceDate: invoiceDate,
+        dueDate: dueDate,
+        vendorId: selectedVendor.id,
+        vendor: {
+          companyName: selectedVendor.companyName,
+          address: selectedVendor.address,
+          phone: selectedVendor.phone,
+          email: selectedVendor.email,
+        },
+        items: processedItems,
+        subtotal,
+        taxType,
+        taxRate: effectiveTaxRate,
+        taxAmount,
+        gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
+        qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
+        grandTotal,
+        status: invoiceStatus,
+        paymentDate: invoiceStatus === 'PAID' ? (paymentDate || invoiceDate) : undefined,
+        notes: notes.trim() || undefined,
+      };
+
+      const updated = onUpdateInvoice(editingInvoice.id, updatedData);
+      if (updated && onInvoiceUpdated) {
+        onInvoiceUpdated(updated);
+      }
+    } else {
+      const invoiceData: Omit<Invoice, 'id' | 'createdAt'> = {
+        invoiceNumber: cleanNumber,
+        invoiceDate: invoiceDate,
+        dueDate: dueDate,
+        vendorId: selectedVendor.id,
+        vendor: {
+          companyName: selectedVendor.companyName,
+          address: selectedVendor.address,
+          phone: selectedVendor.phone,
+          email: selectedVendor.email,
+        },
+        items: processedItems,
+        subtotal,
+        taxType,
+        taxRate: effectiveTaxRate,
+        taxAmount,
+        gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
+        qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
+        grandTotal,
+        status: invoiceStatus,
+        paymentDate: invoiceStatus === 'PAID' ? (paymentDate || invoiceDate) : undefined,
+        notes: notes.trim() || undefined,
+      };
+
+      const created = onSaveInvoice(invoiceData);
+      if (created) {
+        onInvoiceCreated(created);
+      }
     }
   };
 
@@ -292,12 +391,25 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       {/* Header & Mode Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <FilePlus2 className="w-6 h-6 text-indigo-600" />
-            Create & Generate Invoice
-          </h1>
+          <div className="flex items-center gap-2">
+            {editingInvoice ? (
+              <Edit3 className="w-6 h-6 text-amber-600" />
+            ) : (
+              <FilePlus2 className="w-6 h-6 text-indigo-600" />
+            )}
+            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              {editingInvoice ? `Edit Invoice: ${editingInvoice.invoiceNumber}` : 'Create & Generate Invoice'}
+            </h1>
+            {editingInvoice && (
+              <span className="px-2.5 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-800 rounded-full border border-amber-200">
+                Editing
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Create an official invoice formatted to the 9572-1049 QUÉBEC INC. master reference template.
+            {editingInvoice
+              ? 'Update details, items, or taxes for this invoice. Changes are saved to Firestore.'
+              : 'Create an official invoice formatted to the 9572-1049 QUÉBEC INC. master reference template.'}
           </p>
         </div>
 
@@ -338,6 +450,28 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Editing Mode Banner */}
+      {editingInvoice && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-900 text-xs shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+            <span>
+              You are modifying <strong>Invoice #{editingInvoice.invoiceNumber}</strong> (Billed to {editingInvoice.vendor?.companyName || 'Vendor'}).
+            </span>
+          </div>
+          {onCancelEdit && (
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              className="self-start sm:self-auto px-3 py-1 bg-white hover:bg-amber-100/80 border border-amber-300 text-amber-900 rounded-lg font-semibold text-xs transition cursor-pointer flex items-center gap-1.5"
+            >
+              <XCircle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Cancel Editing</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {formError && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-3 animate-shake">
@@ -424,6 +558,67 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                     </select>
                   </div>
                 </div>
+
+                {/* Edit Mode Status Selector */}
+                {editingInvoice && (
+                  <div className="pt-3 border-t border-slate-100">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Invoice Status
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInvoiceStatus('OPEN');
+                              setPaymentDate('');
+                            }}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
+                              invoiceStatus === 'OPEN'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-400/30'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>OPEN / UNPAID</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInvoiceStatus('PAID');
+                              if (!paymentDate) {
+                                setPaymentDate(new Date().toISOString().split('T')[0]);
+                              }
+                            }}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
+                              invoiceStatus === 'PAID'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-400/30'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>PAID</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {invoiceStatus === 'PAID' && (
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Payment Received Date
+                          </label>
+                          <input
+                            type="date"
+                            value={paymentDate}
+                            onChange={(e) => setPaymentDate(e.target.value)}
+                            className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Card 2: Bill To / Vendor Selection */}
@@ -751,10 +946,23 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                 <button
                   type="submit"
                   id="generate-invoice-btn"
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold rounded-lg shadow-md shadow-indigo-600/25 transition flex items-center gap-2 cursor-pointer"
+                  className={`px-6 py-2.5 text-white text-xs font-bold rounded-lg shadow-md transition flex items-center gap-2 cursor-pointer ${
+                    editingInvoice
+                      ? 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800 shadow-amber-600/25'
+                      : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-indigo-600/25'
+                  }`}
                 >
-                  <FileCheck className="w-4 h-4" />
-                  <span>Generate & Save Invoice</span>
+                  {editingInvoice ? (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Save & Update Database</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileCheck className="w-4 h-4" />
+                      <span>Generate & Save Invoice</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -770,8 +978,14 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                   <Eye className="w-4 h-4 text-indigo-600" />
                   Master Template Live Preview
                 </span>
-                <span className="text-[11px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                  Status: <span className="font-bold text-amber-700">OPEN / UNPAID</span> (Default)
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded border font-bold ${
+                    invoiceStatus === 'PAID'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}
+                >
+                  Status: {invoiceStatus === 'PAID' ? 'PAID' : 'OPEN / UNPAID'}
                 </span>
               </div>
 

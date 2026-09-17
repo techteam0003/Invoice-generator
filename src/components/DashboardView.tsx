@@ -11,7 +11,8 @@ import {
   Trash2,
   ArrowUpRight,
   TrendingUp,
-  Building
+  Building,
+  Edit3
 } from 'lucide-react';
 import { Invoice, Vendor, ActiveNavTab } from '../types';
 import { formatCurrency, formatDateToDisplay } from '../utils/formatters';
@@ -23,6 +24,7 @@ interface DashboardViewProps {
   onNavigate: (tab: ActiveNavTab) => void;
   onViewInvoice: (invoice: Invoice) => void;
   onDownloadInvoice: (invoice: Invoice) => void;
+  onEditInvoice?: (invoice: Invoice) => void;
   onMarkAsPaid: (invoiceId: string) => void;
   onDeleteInvoice?: (invoiceId: string) => void;
 }
@@ -33,6 +35,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onViewInvoice,
   onDownloadInvoice,
+  onEditInvoice,
   onMarkAsPaid,
   onDeleteInvoice,
 }) => {
@@ -261,6 +264,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+                        {onEditInvoice && (
+                          <button
+                            onClick={() => onEditInvoice(inv)}
+                            title="Edit Invoice"
+                            className="p-1.5 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded transition cursor-pointer"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => onDownloadInvoice(inv)}
                           title="Download PDF"

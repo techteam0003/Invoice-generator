@@ -39,6 +39,7 @@ export default function App() {
 
   // 4. Modal & Preview States
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [selectedVendorForInvoice, setSelectedVendorForInvoice] = useState<Vendor | null>(null);
   const [globalToast, setGlobalToast] = useState<{ message: string; type?: 'success' | 'info' } | null>(null);
@@ -151,6 +152,33 @@ export default function App() {
     setActiveTab('all-invoices');
   };
 
+  const handleStartEditInvoice = (invoice: Invoice) => {
+    setEditingInvoice(invoice);
+    setSelectedVendorForInvoice(null);
+    setActiveTab('create-invoice');
+  };
+
+  const handleCancelEditInvoice = () => {
+    setEditingInvoice(null);
+    setActiveTab('all-invoices');
+  };
+
+  const handleUpdateInvoice = (invoiceId: string, updates: Partial<Invoice>): Invoice | null => {
+    const updated = storage.updateInvoice(invoiceId, updates);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`Invoice #${updated?.invoiceNumber || invoiceId} updated & saved to Firestore.`);
+    return updated;
+  };
+
+  const handleInvoiceUpdated = (invoice: Invoice) => {
+    setEditingInvoice(null);
+    setPreviewInvoice(invoice);
+    setActiveTab('all-invoices');
+  };
+
   const handleSaveTaxConfig = (config: TaxConfig) => {
     storage.saveTaxConfig(config);
     setTaxConfig(config);
@@ -190,7 +218,10 @@ export default function App() {
           activeTab={activeTab}
           onTabChange={(tab) => {
             setActiveTab(tab);
-            if (tab !== 'create-invoice') setSelectedVendorForInvoice(null);
+            if (tab !== 'create-invoice') {
+              setSelectedVendorForInvoice(null);
+              setEditingInvoice(null);
+            }
           }}
           openCount={openCount}
           paidCount={paidCount}
@@ -214,7 +245,10 @@ export default function App() {
               onTabChange={(tab) => {
                 setActiveTab(tab);
                 setIsMobileSidebarOpen(false);
-                if (tab !== 'create-invoice') setSelectedVendorForInvoice(null);
+                if (tab !== 'create-invoice') {
+                  setSelectedVendorForInvoice(null);
+                  setEditingInvoice(null);
+                }
               }}
               openCount={openCount}
               paidCount={paidCount}
@@ -259,6 +293,7 @@ export default function App() {
               id="top-create-invoice-quick-btn"
               onClick={() => {
                 setSelectedVendorForInvoice(null);
+                setEditingInvoice(null);
                 setActiveTab('create-invoice');
               }}
               className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold rounded-lg shadow-sm transition cursor-pointer"
@@ -285,9 +320,13 @@ export default function App() {
                 vendors={vendors}
                 onNavigate={(tab) => {
                   setActiveTab(tab);
-                  if (tab !== 'create-invoice') setSelectedVendorForInvoice(null);
+                  if (tab !== 'create-invoice') {
+                    setSelectedVendorForInvoice(null);
+                    setEditingInvoice(null);
+                  }
                 }}
                 onViewInvoice={(inv) => setPreviewInvoice(inv)}
+                onEditInvoice={handleStartEditInvoice}
                 onDownloadInvoice={(inv) => handleDownloadInvoice(inv)}
                 onMarkAsPaid={handleMarkAsPaid}
                 onDeleteInvoice={handleDeleteInvoice}
@@ -299,10 +338,14 @@ export default function App() {
                 vendors={vendors}
                 taxConfig={taxConfig}
                 initialVendor={selectedVendorForInvoice}
+                editingInvoice={editingInvoice}
                 onSaveInvoice={handleSaveInvoice}
+                onUpdateInvoice={handleUpdateInvoice}
+                onCancelEdit={handleCancelEditInvoice}
                 onOpenVendorModal={() => setActiveTab('vendors')}
-                isInvoiceNumberTaken={(num) => storage.isInvoiceNumberTaken(num)}
+                isInvoiceNumberTaken={(num, excludeId) => storage.isInvoiceNumberTaken(num, excludeId)}
                 onInvoiceCreated={handleInvoiceCreated}
+                onInvoiceUpdated={handleInvoiceUpdated}
               />
             )}
 
@@ -324,12 +367,14 @@ export default function App() {
                 subtitle="Complete history of all generated invoices stored permanently with live master PDF templates."
                 statusFilterPreset="ALL"
                 onViewInvoice={(inv) => setPreviewInvoice(inv)}
+                onEditInvoice={handleStartEditInvoice}
                 onDownloadInvoice={(inv) => handleDownloadInvoice(inv)}
                 onMarkAsPaid={handleMarkAsPaid}
                 onMarkAsOpen={handleMarkAsOpen}
                 onDeleteInvoice={handleDeleteInvoice}
                 onCreateNewInvoice={() => {
                   setSelectedVendorForInvoice(null);
+                  setEditingInvoice(null);
                   setActiveTab('create-invoice');
                 }}
               />
@@ -343,12 +388,14 @@ export default function App() {
                 subtitle="Invoices awaiting client payment. Mark as Paid when payment is received to close the invoice."
                 statusFilterPreset="OPEN"
                 onViewInvoice={(inv) => setPreviewInvoice(inv)}
+                onEditInvoice={handleStartEditInvoice}
                 onDownloadInvoice={(inv) => handleDownloadInvoice(inv)}
                 onMarkAsPaid={handleMarkAsPaid}
                 onMarkAsOpen={handleMarkAsOpen}
                 onDeleteInvoice={handleDeleteInvoice}
                 onCreateNewInvoice={() => {
                   setSelectedVendorForInvoice(null);
+                  setEditingInvoice(null);
                   setActiveTab('create-invoice');
                 }}
               />
@@ -362,12 +409,14 @@ export default function App() {
                 subtitle="Closed invoices with recorded payment completion dates and finalized receipts."
                 statusFilterPreset="PAID"
                 onViewInvoice={(inv) => setPreviewInvoice(inv)}
+                onEditInvoice={handleStartEditInvoice}
                 onDownloadInvoice={(inv) => handleDownloadInvoice(inv)}
                 onMarkAsPaid={handleMarkAsPaid}
                 onMarkAsOpen={handleMarkAsOpen}
                 onDeleteInvoice={handleDeleteInvoice}
                 onCreateNewInvoice={() => {
                   setSelectedVendorForInvoice(null);
+                  setEditingInvoice(null);
                   setActiveTab('create-invoice');
                 }}
               />
@@ -392,6 +441,7 @@ export default function App() {
           onMarkAsPaid={handleMarkAsPaid}
           onMarkAsOpen={handleMarkAsOpen}
           onDeleteInvoice={handleDeleteInvoice}
+          onEditInvoice={handleStartEditInvoice}
         />
       )}
     </div>
