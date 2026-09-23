@@ -9,13 +9,17 @@ import {
   FileText,
   Share2,
   AlertCircle,
-  Edit3
+  Edit3,
+  CreditCard,
+  Paperclip
 } from 'lucide-react';
-import { Invoice } from '../types';
+import { Invoice, PaymentRecord, InvoiceAttachment } from '../types';
 import { MasterInvoiceSheet } from './MasterInvoiceSheet';
 import { downloadInvoicePDF, printInvoice } from '../utils/pdfGenerator';
 import { formatCurrency, formatDateToDisplay } from '../utils/formatters';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
+import { RecordPaymentModal } from './RecordPaymentModal';
+import { AttachmentViewerModal } from './AttachmentViewerModal';
 
 interface InvoicePreviewModalProps {
   invoice: Invoice | null;
@@ -24,6 +28,12 @@ interface InvoicePreviewModalProps {
   onMarkAsOpen: (invoiceId: string) => void;
   onEditInvoice?: (invoice: Invoice) => void;
   onDeleteInvoice?: (invoiceId: string) => void;
+  onRecordPayment?: (invoiceId: string, payment: Omit<PaymentRecord, 'id' | 'recordedAt'>) => void;
+  onUpdatePayment?: (invoiceId: string, paymentId: string, updates: Partial<PaymentRecord>) => void;
+  onDeletePayment?: (invoiceId: string, paymentId: string) => void;
+  onAddAttachment?: (invoiceId: string, attachment: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>) => void;
+  onAddAttachments?: (invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>) => void;
+  onRemoveAttachment?: (invoiceId: string, attachmentId: string) => void;
 }
 
 export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
@@ -33,10 +43,18 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
   onMarkAsOpen,
   onEditInvoice,
   onDeleteInvoice,
+  onRecordPayment,
+  onUpdatePayment,
+  onDeletePayment,
+  onAddAttachment,
+  onAddAttachments,
+  onRemoveAttachment,
 }) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
 
   if (!invoice) return null;
 
@@ -55,6 +73,10 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
   };
 
   const isPaid = invoice.status === 'PAID';
+  const isPartiallyPaid = invoice.status === 'PARTIALLY_PAID';
+  const amountPaid = invoice.amountPaid || 0;
+  const balanceDue = invoice.balanceDue !== undefined ? invoice.balanceDue : Math.max(0, invoice.grandTotal - amountPaid);
+  const attachmentCount = invoice.attachments?.length || 0;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:p-0 print:bg-white">
@@ -70,37 +92,59 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
                 <h2 className="text-sm font-bold text-white font-mono">{invoice.invoiceNumber}</h2>
                 {isPaid ? (
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    PAID
+                    PAID IN FULL
+                  </span>
+                ) : isPartiallyPaid ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                    <span>PARTIALLY PAID</span>
+                    <span className="font-mono font-normal">({formatCurrency(amountPaid)} / {formatCurrency(invoice.grandTotal)})</span>
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-700 text-slate-300 border border-slate-600">
                     OPEN / UNPAID
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                {invoice.vendor?.companyName} • {formatCurrency(invoice.grandTotal)}
+                {invoice.vendor?.companyName} • Total: {formatCurrency(invoice.grandTotal)}
+                {isPartiallyPaid && (
+                  <span className="text-amber-400 font-semibold ml-1.5">
+                    • Bal: {formatCurrency(balanceDue)}
+                  </span>
+                )}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Status toggle */}
-            {!isPaid ? (
+            {/* Record / Manage Payments */}
+            {onRecordPayment && (
               <button
-                onClick={() => onMarkAsPaid(invoice.id)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                onClick={() => setShowPaymentModal(true)}
+                id="modal-record-payment-btn"
+                title="Record or update partial payment received"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Mark as Paid</span>
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Payments {invoice.payments && invoice.payments.length > 0 ? `(${invoice.payments.length})` : ''}</span>
               </button>
-            ) : (
+            )}
+
+            {/* Attachments */}
+            {onAddAttachment && (
               <button
-                onClick={() => onMarkAsOpen(invoice.id)}
-                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                onClick={() => setShowAttachmentsModal(true)}
+                id="modal-attachments-btn"
+                title="View or upload attachments (images or PDFs)"
+                className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer"
               >
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Reopen Invoice</span>
+                <Paperclip className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Files</span>
+                {attachmentCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-indigo-600 text-[10px] font-bold text-white flex items-center justify-center">
+                    {attachmentCount}
+                  </span>
+                )}
               </button>
             )}
 
@@ -118,7 +162,7 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
               onClick={handleDownloadPDF}
               disabled={isDownloading}
               id="modal-download-pdf-btn"
-              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold rounded-lg transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-60"
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-60"
             >
               {isDownloading ? (
                 <>
@@ -128,7 +172,7 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  <span>Download PDF</span>
+                  <span>PDF</span>
                 </>
               )}
             </button>
@@ -181,6 +225,30 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Record / Manage Payments Modal */}
+      {showPaymentModal && onRecordPayment && onUpdatePayment && onDeletePayment && (
+        <RecordPaymentModal
+          isOpen={showPaymentModal}
+          invoice={invoice}
+          onClose={() => setShowPaymentModal(false)}
+          onRecordPayment={onRecordPayment}
+          onUpdatePayment={onUpdatePayment}
+          onDeletePayment={onDeletePayment}
+        />
+      )}
+
+      {/* Attachments Modal */}
+      {showAttachmentsModal && onAddAttachment && onRemoveAttachment && (
+        <AttachmentViewerModal
+          isOpen={showAttachmentsModal}
+          invoice={invoice}
+          onClose={() => setShowAttachmentsModal(false)}
+          onAddAttachment={onAddAttachment}
+          onAddAttachments={onAddAttachments}
+          onRemoveAttachment={onRemoveAttachment}
+        />
+      )}
 
       {/* Delete Confirmation Popup */}
       <DeleteConfirmModal

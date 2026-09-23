@@ -15,6 +15,10 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
   showStatusBadge = false,
 }) => {
   const isPaid = invoice.status === 'PAID';
+  const isPartiallyPaid = invoice.status === 'PARTIALLY_PAID';
+  const hasPayments = (invoice.amountPaid && invoice.amountPaid > 0) || (invoice.payments && invoice.payments.length > 0);
+  const amountPaid = invoice.amountPaid || 0;
+  const balanceDue = invoice.balanceDue !== undefined ? invoice.balanceDue : Math.max(0, invoice.grandTotal - amountPaid);
   const taxLabel = () => {
     if (invoice.taxType === 'QUEBEC') {
       return `Quebec Tax (GST 5% + QST 9.975% = 14.975%):`;
@@ -51,6 +55,19 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
               {formatDateToDisplay(invoice.paymentDate)}
             </div>
           )}
+        </div>
+      )}
+
+      {showStatusBadge && isPartiallyPaid && (
+        <div
+          id="invoice-partial-stamp"
+          className="absolute top-12 right-12 border-4 border-amber-500/80 text-amber-600/90 font-black text-xl tracking-wider px-5 py-2 rounded uppercase transform rotate-[-10deg] pointer-events-none select-none text-center"
+          style={{ letterSpacing: '0.15em' }}
+        >
+          PARTIAL PAYMENT
+          <div className="text-[10px] font-semibold text-center mt-0.5 tracking-normal text-slate-800">
+            Bal: ${formatRawAmount(balanceDue)}
+          </div>
         </div>
       )}
 
@@ -227,15 +244,88 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
           {/* Grand Total Bar */}
           <div
             id="invoice-grand-total-row"
-            className="flex justify-between items-center py-2.5 border-t-2 border-b-2 border-slate-900 mt-2"
+            className="flex justify-between items-center py-2 border-t-2 border-slate-900 mt-2"
           >
-            <span className="text-[15px] font-bold text-slate-950">Total Due:</span>
-            <span className="text-[17px] font-bold font-mono text-slate-950">
+            <span className="text-[14px] font-bold text-slate-950">Total Billed:</span>
+            <span className="text-[16px] font-bold font-mono text-slate-950">
               ${formatRawAmount(invoice.grandTotal)}
             </span>
           </div>
+
+          {/* Payments Received & Net Balance Due if payments exist */}
+          {hasPayments && (
+            <>
+              <div className="flex justify-between py-1 text-emerald-700 font-medium">
+                <span>Less: Payments Received:</span>
+                <span className="font-mono font-bold">
+                  -${formatRawAmount(amountPaid)}
+                </span>
+              </div>
+              <div
+                id="invoice-balance-due-row"
+                className="flex justify-between items-center py-2.5 border-t-2 border-b-2 border-slate-900 mt-1 bg-slate-50 px-2"
+              >
+                <span className="text-[15px] font-black text-slate-950">
+                  {balanceDue <= 0.001 ? 'Balance Due (PAID IN FULL):' : 'Net Balance Due:'}
+                </span>
+                <span className={`text-[17px] font-black font-mono ${balanceDue <= 0.001 ? 'text-emerald-700' : 'text-slate-950'}`}>
+                  ${formatRawAmount(balanceDue)}
+                </span>
+              </div>
+            </>
+          )}
+
+          {!hasPayments && (
+            <div
+              id="invoice-balance-due-row"
+              className="flex justify-between items-center py-1 border-b-2 border-slate-900"
+            />
+          )}
         </div>
       </div>
+
+      {/* Optional Payment History Table if installments have been recorded */}
+      {invoice.payments && invoice.payments.length > 0 && (
+        <div id="invoice-payments-history-block" className="mb-6 pt-3 border-t border-slate-200">
+          <h2 className="text-[12px] font-bold text-[#2B6CB0] uppercase tracking-wider mb-2">
+            PAYMENT TRANSACTION RECORD ({invoice.payments.length})
+          </h2>
+          <table className="w-full border-collapse text-[12px] border border-slate-200">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700 text-left font-semibold">
+                <th className="py-1.5 px-3 border-r border-slate-200">Date Received</th>
+                <th className="py-1.5 px-3 border-r border-slate-200">Method</th>
+                <th className="py-1.5 px-3 border-r border-slate-200">Reference / Notes</th>
+                <th className="py-1.5 px-3 text-right">Amount Paid</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-slate-800">
+              {invoice.payments.map((p, pIdx) => (
+                <tr key={p.id || pIdx} className="hover:bg-slate-50">
+                  <td className="py-1.5 px-3 border-r border-slate-200 font-medium">
+                    {formatDateToDisplay(p.date)}
+                  </td>
+                  <td className="py-1.5 px-3 border-r border-slate-200">{p.method}</td>
+                  <td className="py-1.5 px-3 border-r border-slate-200 text-slate-600">
+                    {[p.reference, p.notes].filter(Boolean).join(' — ') || 'Payment installment'}
+                  </td>
+                  <td className="py-1.5 px-3 text-right font-mono font-bold text-emerald-700">
+                    ${formatRawAmount(p.amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Attachments Notice if documents attached */}
+      {invoice.attachments && invoice.attachments.length > 0 && (
+        <div id="invoice-attachments-notice" className="mb-4 text-[11px] text-slate-600 flex items-center gap-1.5">
+          <span className="font-bold text-slate-800">Attached Documents ({invoice.attachments.length}):</span>
+          <span>{invoice.attachments.map((a) => a.name).join(', ')}</span>
+        </div>
+      )}
 
       {/* Cheques Payable Line */}
       <div id="invoice-cheque-line" className="mb-5">

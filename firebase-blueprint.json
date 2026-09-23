@@ -42,6 +42,10 @@
         "grandTotal": { "type": "number" },
         "status": { "type": "string" },
         "paymentDate": { "type": "string" },
+        "amountPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "payments": { "type": "array" },
+        "attachments": { "type": "array" },
         "notes": { "type": "string" },
         "createdAt": { "type": "string" }
       },

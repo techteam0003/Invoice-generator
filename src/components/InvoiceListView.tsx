@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Files,
   Search,
@@ -14,11 +14,17 @@ import {
   Plus,
   FileSpreadsheet,
   AlertCircle,
-  Edit3
+  Edit3,
+  Paperclip,
+  CreditCard,
+  FileText,
+  Image as ImageIcon
 } from 'lucide-react';
-import { Invoice, Vendor } from '../types';
-import { formatCurrency, formatDateToDisplay } from '../utils/formatters';
+import { Invoice, Vendor, InvoiceAttachment } from '../types';
+import { formatCurrency, formatDateToDisplay, downloadAttachment, downloadAllAttachments } from '../utils/formatters';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
+import { AttachmentViewerModal } from './AttachmentViewerModal';
+import { storage } from '../services/storage';
 
 interface InvoiceListViewProps {
   invoices: Invoice[];
@@ -33,6 +39,9 @@ interface InvoiceListViewProps {
   onMarkAsOpen: (invoiceId: string) => void;
   onDeleteInvoice: (invoiceId: string) => void;
   onCreateNewInvoice: () => void;
+  onAddAttachment?: (invoiceId: string, attachment: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>) => void;
+  onAddAttachments?: (invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>) => void;
+  onRemoveAttachment?: (invoiceId: string, attachmentId: string) => void;
 }
 
 export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
@@ -48,11 +57,27 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
   onMarkAsOpen,
   onDeleteInvoice,
   onCreateNewInvoice,
+  onAddAttachment,
+  onAddAttachments,
+  onRemoveAttachment,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVendorFilter, setSelectedVendorFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PAID'>(statusFilterPreset);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PARTIALLY_PAID' | 'PAID'>(
+    statusFilterPreset === 'ALL' ? 'ALL' : statusFilterPreset
+  );
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
+
+  // Attachment interactive modal & popover state
+  const [attachmentModalInvoice, setAttachmentModalInvoice] = useState<Invoice | null>(null);
+  const [activeAttachmentDropdownId, setActiveAttachmentDropdownId] = useState<string | null>(null);
+
+  // Close attachment dropdown when clicking outside
+  useEffect(() => {
+    const handleGlobalClick = () => setActiveAttachmentDropdownId(null);
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, []);
 
   // Mark paid modal state
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
@@ -64,8 +89,13 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
   const filteredInvoices = useMemo(() => {
     return (invoices || []).filter((inv) => {
       // Preset status filter
-      if (statusFilterPreset !== 'ALL' && inv.status !== statusFilterPreset) {
-        return false;
+      if (statusFilterPreset !== 'ALL') {
+        if (statusFilterPreset === 'OPEN') {
+          // In "open invoices" tab, include OPEN and PARTIALLY_PAID
+          if (inv.status !== 'OPEN' && inv.status !== 'PARTIALLY_PAID') return false;
+        } else if (inv.status !== statusFilterPreset) {
+          return false;
+        }
       }
       if (statusFilterPreset === 'ALL' && statusFilter !== 'ALL' && inv.status !== statusFilter) {
         return false;
@@ -172,6 +202,7 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
               >
                 <option value="ALL">All Statuses</option>
                 <option value="OPEN">Open / Unpaid</option>
+                <option value="PARTIALLY_PAID">Partially Paid</option>
                 <option value="PAID">Paid / Completed</option>
               </select>
             </div>
@@ -243,12 +274,128 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                   <tr key={inv.id} className="hover:bg-slate-50/80 transition">
                     {/* Invoice Number */}
                     <td className="py-3.5 px-4 font-bold font-mono text-slate-900">
-                      <button
-                        onClick={() => onViewInvoice(inv)}
-                        className="text-indigo-700 hover:text-indigo-900 hover:underline cursor-pointer"
-                      >
-                        {inv.invoiceNumber}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => onViewInvoice(inv)}
+                          className="text-indigo-700 hover:text-indigo-900 hover:underline cursor-pointer"
+                        >
+                          {inv.invoiceNumber}
+                        </button>
+                        {inv.attachments && inv.attachments.length > 0 && (
+                          <div className="relative inline-block">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveAttachmentDropdownId(
+                                  activeAttachmentDropdownId === inv.id ? null : inv.id
+                                );
+                              }}
+                              title={`Click to view or download ${inv.attachments.length} attachment(s)`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] font-bold transition cursor-pointer shadow-2xs group"
+                            >
+                              <Paperclip className="w-3 h-3 text-indigo-600 group-hover:scale-110 transition-transform" />
+                              <span>{inv.attachments.length}</span>
+                            </button>
+
+                            {/* Dropdown Popover */}
+                            {activeAttachmentDropdownId === inv.id && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute left-0 top-full mt-1.5 z-40 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 p-2.5 text-left font-sans animate-in fade-in zoom-in-95 duration-100"
+                              >
+                                <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 text-xs font-bold text-slate-800">
+                                  <span className="flex items-center gap-1.5">
+                                    <Paperclip className="w-3.5 h-3.5 text-indigo-600" />
+                                    Attachments ({inv.attachments.length})
+                                  </span>
+                                  {inv.attachments.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadAllAttachments(inv.attachments || [])}
+                                      className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      Download All
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+                                  {inv.attachments.map((att) => {
+                                    const isPdf = att.type?.includes('pdf') || att.name.toLowerCase().endsWith('.pdf');
+                                    return (
+                                      <div
+                                        key={att.id}
+                                        className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 border border-slate-100 transition text-xs"
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0 pr-1">
+                                          <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${
+                                            isPdf ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+                                          }`}>
+                                            {isPdf ? <FileText className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="font-semibold text-slate-800 truncate text-[11px]" title={att.name}>
+                                              {att.name}
+                                            </p>
+                                            <p className="text-[9px] text-slate-400 font-mono">
+                                              {att.size ? (att.size < 1024 * 1024 ? `${Math.round(att.size / 1024)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`) : ''}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setActiveAttachmentDropdownId(null);
+                                              setAttachmentModalInvoice(inv);
+                                            }}
+                                            title="Open and view preview"
+                                            className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition cursor-pointer"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => downloadAttachment(att)}
+                                            title="Download this file"
+                                            className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition cursor-pointer"
+                                          >
+                                            <Download className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                <div className="pt-2 mt-2 border-t border-slate-100 flex items-center justify-between">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveAttachmentDropdownId(null);
+                                      setAttachmentModalInvoice(inv);
+                                    }}
+                                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                    <span>Full Viewer & Manager</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveAttachmentDropdownId(null)}
+                                    className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                                  >
+                                    Close
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     {/* Vendor Name */}
@@ -271,9 +418,14 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                       {formatCurrency(inv.taxAmount)}
                     </td>
 
-                    {/* Total Amount */}
+                    {/* Total Amount & Balance */}
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-950">
-                      {formatCurrency(inv.grandTotal)}
+                      <div>{formatCurrency(inv.grandTotal)}</div>
+                      {inv.status === 'PARTIALLY_PAID' && (
+                        <div className="text-[10px] text-amber-600 font-normal">
+                          Bal: {formatCurrency(inv.balanceDue || 0)}
+                        </div>
+                      )}
                     </td>
 
                     {/* Status */}
@@ -282,6 +434,14 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                           <CheckCircle2 className="w-3 h-3" />
                           PAID
+                        </span>
+                      ) : inv.status === 'PARTIALLY_PAID' ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200"
+                          title={`Paid: ${formatCurrency(inv.amountPaid || 0)} / Balance: ${formatCurrency(inv.balanceDue || 0)}`}
+                        >
+                          <CreditCard className="w-3 h-3 text-blue-600" />
+                          <span>PARTIAL</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
@@ -297,6 +457,10 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                         <span className="font-semibold text-emerald-800">
                           {formatDateToDisplay(inv.paymentDate)}
                         </span>
+                      ) : inv.status === 'PARTIALLY_PAID' && inv.payments && inv.payments.length > 0 ? (
+                        <span className="font-medium text-blue-700">
+                          {formatDateToDisplay(inv.payments[inv.payments.length - 1].date)}
+                        </span>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
@@ -305,7 +469,7 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {inv.status === 'OPEN' ? (
+                        {inv.status !== 'PAID' ? (
                           <button
                             onClick={() => {
                               setPayingInvoice(inv);
@@ -352,6 +516,20 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                         >
                           <Download className="w-4 h-4" />
                         </button>
+
+                        {inv.attachments && inv.attachments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setAttachmentModalInvoice(inv)}
+                            title={`View & Download ${inv.attachments.length} attachment(s)`}
+                            className="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition cursor-pointer relative"
+                          >
+                            <Paperclip className="w-4 h-4" />
+                            <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 bg-indigo-600 text-white rounded-full text-[9px] font-bold flex items-center justify-center">
+                              {inv.attachments.length}
+                            </span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => setInvoiceToDelete(inv)}
@@ -441,6 +619,42 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Attachment Viewer & Download Modal */}
+      {attachmentModalInvoice && (
+        <AttachmentViewerModal
+          isOpen={Boolean(attachmentModalInvoice)}
+          invoice={attachmentModalInvoice}
+          onClose={() => setAttachmentModalInvoice(null)}
+          onAddAttachment={(invoiceId, att) => {
+            if (onAddAttachment) {
+              onAddAttachment(invoiceId, att);
+            } else {
+              storage.addAttachment(invoiceId, att);
+            }
+            const updated = storage.getInvoiceById(invoiceId);
+            if (updated) setAttachmentModalInvoice(updated);
+          }}
+          onAddAttachments={(invoiceId, atts) => {
+            if (onAddAttachments) {
+              onAddAttachments(invoiceId, atts);
+            } else {
+              storage.addAttachments(invoiceId, atts);
+            }
+            const updated = storage.getInvoiceById(invoiceId);
+            if (updated) setAttachmentModalInvoice(updated);
+          }}
+          onRemoveAttachment={(invoiceId, attId) => {
+            if (onRemoveAttachment) {
+              onRemoveAttachment(invoiceId, attId);
+            } else {
+              storage.removeAttachment(invoiceId, attId);
+            }
+            const updated = storage.getInvoiceById(invoiceId);
+            if (updated) setAttachmentModalInvoice(updated);
+          }}
+        />
       )}
     </div>
   );

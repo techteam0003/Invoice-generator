@@ -27,7 +27,26 @@ export interface TaxConfig {
   customTaxLabel: string;
 }
 
-export type InvoiceStatus = 'OPEN' | 'PAID';
+export type InvoiceStatus = 'OPEN' | 'PARTIALLY_PAID' | 'PAID';
+
+export interface PaymentRecord {
+  id: string;
+  amount: number;
+  date: string;          // YYYY-MM-DD
+  method: string;        // 'Bank Transfer' | 'Cheque' | 'Cash' | 'Credit Card' | 'Interac / e-Transfer' | 'Other'
+  reference?: string;    // e.g. Cheque # or Transaction Reference
+  notes?: string;
+  recordedAt: string;    // ISO string
+}
+
+export interface InvoiceAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;          // mime type: image/png, image/jpeg, application/pdf, etc.
+  dataUrl: string;       // base64 data url
+  uploadedAt: string;
+}
 
 export interface Invoice {
   id: string;
@@ -53,6 +72,12 @@ export interface Invoice {
   paymentDate?: string;
   createdAt: string;
   notes?: string;
+
+  // Partial Payments and Attachments
+  payments?: PaymentRecord[];
+  amountPaid?: number;
+  balanceDue?: number;
+  attachments?: InvoiceAttachment[];
 }
 
 export interface MasterCompanyInfo {

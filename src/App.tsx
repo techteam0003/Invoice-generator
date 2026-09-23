@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { storage } from './services/storage';
-import { Invoice, Vendor, TaxConfig, ActiveNavTab } from './types';
+import { Invoice, Vendor, TaxConfig, ActiveNavTab, PaymentRecord, InvoiceAttachment } from './types';
 import { LoginView } from './components/LoginView';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -185,6 +185,73 @@ export default function App() {
     showToast('Tax preferences saved to database.');
   };
 
+  const handleRecordPayment = (
+    invoiceId: string,
+    paymentData: Omit<PaymentRecord, 'id' | 'recordedAt'>
+  ) => {
+    const updated = storage.recordPayment(invoiceId, paymentData);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`Payment of $${paymentData.amount.toFixed(2)} recorded and saved to Firestore.`);
+  };
+
+  const handleUpdatePayment = (
+    invoiceId: string,
+    paymentId: string,
+    updates: Partial<PaymentRecord>
+  ) => {
+    const updated = storage.updatePayment(invoiceId, paymentId, updates);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`Payment record updated in Firestore.`);
+  };
+
+  const handleDeletePayment = (invoiceId: string, paymentId: string) => {
+    const updated = storage.deletePayment(invoiceId, paymentId);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`Payment record deleted from database.`);
+  };
+
+  const handleAddAttachment = (
+    invoiceId: string,
+    attachmentData: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>
+  ) => {
+    const updated = storage.addAttachment(invoiceId, attachmentData);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`Attachment "${attachmentData.name}" uploaded and saved to Firestore.`);
+  };
+
+  const handleAddAttachments = (
+    invoiceId: string,
+    attachmentsData: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>
+  ) => {
+    const updated = storage.addAttachments(invoiceId, attachmentsData);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`${attachmentsData.length} attachment(s) uploaded and saved to database.`);
+  };
+
+  const handleRemoveAttachment = (invoiceId: string, attachmentId: string) => {
+    const updated = storage.removeAttachment(invoiceId, attachmentId);
+    setInvoices(storage.getInvoices());
+    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+      setPreviewInvoice(updated);
+    }
+    showToast(`Attachment removed from invoice.`);
+  };
+
   const handleResetData = async () => {
     await storage.resetAllData();
     setInvoices(storage.getInvoices());
@@ -330,6 +397,9 @@ export default function App() {
                 onDownloadInvoice={(inv) => handleDownloadInvoice(inv)}
                 onMarkAsPaid={handleMarkAsPaid}
                 onDeleteInvoice={handleDeleteInvoice}
+                onAddAttachment={handleAddAttachment}
+                onAddAttachments={handleAddAttachments}
+                onRemoveAttachment={handleRemoveAttachment}
               />
             )}
 
@@ -377,6 +447,9 @@ export default function App() {
                   setEditingInvoice(null);
                   setActiveTab('create-invoice');
                 }}
+                onAddAttachment={handleAddAttachment}
+                onAddAttachments={handleAddAttachments}
+                onRemoveAttachment={handleRemoveAttachment}
               />
             )}
 
@@ -398,6 +471,9 @@ export default function App() {
                   setEditingInvoice(null);
                   setActiveTab('create-invoice');
                 }}
+                onAddAttachment={handleAddAttachment}
+                onAddAttachments={handleAddAttachments}
+                onRemoveAttachment={handleRemoveAttachment}
               />
             )}
 
@@ -419,6 +495,9 @@ export default function App() {
                   setEditingInvoice(null);
                   setActiveTab('create-invoice');
                 }}
+                onAddAttachment={handleAddAttachment}
+                onAddAttachments={handleAddAttachments}
+                onRemoveAttachment={handleRemoveAttachment}
               />
             )}
 
@@ -442,6 +521,12 @@ export default function App() {
           onMarkAsOpen={handleMarkAsOpen}
           onDeleteInvoice={handleDeleteInvoice}
           onEditInvoice={handleStartEditInvoice}
+          onRecordPayment={handleRecordPayment}
+          onUpdatePayment={handleUpdatePayment}
+          onDeletePayment={handleDeletePayment}
+          onAddAttachment={handleAddAttachment}
+          onAddAttachments={handleAddAttachments}
+          onRemoveAttachment={handleRemoveAttachment}
         />
       )}
     </div>

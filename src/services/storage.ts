@@ -10,7 +10,7 @@ import {
   Unsubscribe
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Invoice, Vendor, TaxConfig } from '../types';
+import { Invoice, Vendor, TaxConfig, PaymentRecord, InvoiceAttachment, InvoiceStatus } from '../types';
 import { DEFAULT_TAX_CONFIG } from '../constants/companyInfo';
 
 const COLLECTIONS = {
@@ -25,6 +25,99 @@ const STORAGE_KEYS = {
   TAX_CONFIG: 'bk_invoice_manager_tax_config_v1',
   AUTH: 'bk_invoice_manager_auth_v1',
 };
+
+/**
+ * Normalizes an invoice object ensuring all fields like payments, attachments, amountPaid, and balanceDue exist.
+ */
+export function normalizeInvoice(data: any, id: string): Invoice {
+  const items = Array.isArray(data.items)
+    ? data.items.map((it: any) => ({
+        id: it.id || 'item-' + Math.random().toString(36).substring(2, 6),
+        title: it.title || '',
+        subDetails: it.subDetails || undefined,
+        quantity: Number(it.quantity) || 1,
+        rate: Number(it.rate) || 0,
+        amount: Number(it.amount) || 0,
+      }))
+    : [];
+
+  const subtotal = Number(data.subtotal) || 0;
+  const taxRate = Number(data.taxRate) || 13;
+  const taxAmount = Number(data.taxAmount) || 0;
+  const grandTotal = Number(data.grandTotal) || (subtotal + taxAmount);
+
+  const payments: PaymentRecord[] = Array.isArray(data.payments)
+    ? data.payments.map((p: any) => ({
+        id: p.id || 'pmt_' + Math.random().toString(36).substring(2, 6),
+        amount: Number(p.amount) || 0,
+        date: p.date || '',
+        method: p.method || 'Bank Transfer',
+        reference: p.reference || undefined,
+        notes: p.notes || undefined,
+        recordedAt: p.recordedAt || new Date().toISOString(),
+      }))
+    : [];
+
+  const calculatedPaid = payments.reduce((acc: number, p: any) => acc + (p.amount || 0), 0);
+  const amountPaid = data.amountPaid !== undefined && !isNaN(Number(data.amountPaid))
+    ? Number(data.amountPaid)
+    : (payments.length > 0 ? calculatedPaid : (data.status === 'PAID' ? grandTotal : 0));
+  const balanceDue = data.balanceDue !== undefined && !isNaN(Number(data.balanceDue))
+    ? Number(data.balanceDue)
+    : Math.max(0, grandTotal - amountPaid);
+
+  let status: InvoiceStatus = data.status || 'OPEN';
+  if (amountPaid >= grandTotal - 0.001 && grandTotal > 0) {
+    status = 'PAID';
+  } else if (amountPaid > 0) {
+    status = 'PARTIALLY_PAID';
+  } else if (data.status === 'PAID') {
+    status = 'PAID';
+  } else {
+    status = 'OPEN';
+  }
+
+  const attachments: InvoiceAttachment[] = Array.isArray(data.attachments)
+    ? data.attachments.map((att: any) => ({
+        id: att.id || 'att_' + Math.random().toString(36).substring(2, 6),
+        name: att.name || 'attachment',
+        size: Number(att.size) || 0,
+        type: att.type || 'application/octet-stream',
+        dataUrl: att.dataUrl || '',
+        uploadedAt: att.uploadedAt || new Date().toISOString(),
+      }))
+    : [];
+
+  return {
+    id,
+    invoiceNumber: data.invoiceNumber || 'INV-UNKNOWN',
+    invoiceDate: data.invoiceDate || '',
+    dueDate: data.dueDate || 'Net 7 days',
+    vendorId: data.vendorId || '',
+    vendor: {
+      companyName: data.vendor?.companyName || '',
+      address: data.vendor?.address || '',
+      phone: data.vendor?.phone || undefined,
+      email: data.vendor?.email || undefined,
+    },
+    items,
+    subtotal,
+    taxType: data.taxType || 'HST',
+    taxRate,
+    taxAmount,
+    gstAmount: data.gstAmount !== undefined && data.gstAmount !== null ? Number(data.gstAmount) : undefined,
+    qstAmount: data.qstAmount !== undefined && data.qstAmount !== null ? Number(data.qstAmount) : undefined,
+    grandTotal,
+    status,
+    paymentDate: data.paymentDate || undefined,
+    createdAt: data.createdAt || new Date().toISOString(),
+    notes: data.notes || undefined,
+    payments,
+    amountPaid,
+    balanceDue,
+    attachments,
+  };
+}
 
 /**
  * Deeply cleans an object so that no `undefined` values are passed to Firestore setDoc/updateDoc
@@ -199,42 +292,9 @@ export const storage = {
           } else {
             const list: Invoice[] = [];
             snapshot.forEach((docSnap) => {
-              const data = docSnap.data() as any;
+              const data = docSnap.data();
               if (data) {
-                list.push({
-                  id: docSnap.id,
-                  invoiceNumber: data.invoiceNumber || 'INV-UNKNOWN',
-                  invoiceDate: data.invoiceDate || '',
-                  dueDate: data.dueDate || 'Net 7 days',
-                  vendorId: data.vendorId || '',
-                  vendor: {
-                    companyName: data.vendor?.companyName || '',
-                    address: data.vendor?.address || '',
-                    phone: data.vendor?.phone || undefined,
-                    email: data.vendor?.email || undefined,
-                  },
-                  items: Array.isArray(data.items)
-                    ? data.items.map((it: any) => ({
-                        id: it.id || 'item-' + Math.random().toString(36).substring(2, 6),
-                        title: it.title || '',
-                        subDetails: it.subDetails || undefined,
-                        quantity: Number(it.quantity) || 1,
-                        rate: Number(it.rate) || 0,
-                        amount: Number(it.amount) || 0,
-                      }))
-                    : [],
-                  subtotal: Number(data.subtotal) || 0,
-                  taxType: data.taxType || 'HST',
-                  taxRate: Number(data.taxRate) || 13,
-                  taxAmount: Number(data.taxAmount) || 0,
-                  gstAmount: data.gstAmount !== undefined && data.gstAmount !== null ? Number(data.gstAmount) : undefined,
-                  qstAmount: data.qstAmount !== undefined && data.qstAmount !== null ? Number(data.qstAmount) : undefined,
-                  grandTotal: Number(data.grandTotal) || 0,
-                  status: data.status === 'PAID' ? 'PAID' : 'OPEN',
-                  paymentDate: data.paymentDate || undefined,
-                  createdAt: data.createdAt || new Date().toISOString(),
-                  notes: data.notes || undefined,
-                });
+                list.push(normalizeInvoice(data, docSnap.id));
               }
             });
             list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -328,13 +388,15 @@ export const storage = {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.INVOICES);
       if (!data) {
-        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(SEED_INVOICES));
-        return SEED_INVOICES;
+        const seeded = SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
+        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(seeded));
+        return seeded;
       }
       const parsed = JSON.parse(data);
-      return Array.isArray(parsed) ? parsed : SEED_INVOICES;
+      if (!Array.isArray(parsed)) return SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
+      return parsed.map((item) => normalizeInvoice(item, item.id || 'inv_' + Math.random().toString(36).substring(2, 6)));
     } catch {
-      return SEED_INVOICES;
+      return SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
     }
   },
 
@@ -358,6 +420,10 @@ export const storage = {
 
   getInvoices(): Invoice[] {
     return this.getInvoicesLocal();
+  },
+
+  getInvoiceById(id: string): Invoice | null {
+    return this.getInvoicesLocal().find((inv) => inv.id === id) || null;
   },
 
   getTaxConfig(): TaxConfig {
@@ -415,11 +481,11 @@ export const storage = {
 
   // Invoice CRUD operations (Persists to Firestore + Local Cache)
   saveInvoice(invoice: Omit<Invoice, 'id' | 'createdAt'>): Invoice {
-    const newInvoice: Invoice = {
+    const rawId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newInvoice = normalizeInvoice({
       ...invoice,
-      id: 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      createdAt: new Date().toISOString(),
-    };
+      createdAt: new Date().toISOString()
+    }, rawId);
 
     // Update local cache synchronously
     const invoices = this.getInvoicesLocal();
@@ -438,7 +504,9 @@ export const storage = {
     const invoices = this.getInvoicesLocal();
     const index = invoices.findIndex((i) => i.id === id);
     if (index === -1) return null;
-    const updated = { ...invoices[index], ...updates };
+    
+    const merged = { ...invoices[index], ...updates };
+    const updated = normalizeInvoice(merged, id);
     invoices[index] = updated;
     localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
@@ -449,22 +517,259 @@ export const storage = {
     return updated;
   },
 
-  updateInvoiceStatus(id: string, status: 'OPEN' | 'PAID', paymentDate?: string): Invoice | null {
+  updateInvoiceStatus(id: string, status: InvoiceStatus, paymentDate?: string): Invoice | null {
     const invoices = this.getInvoicesLocal();
     const index = invoices.findIndex((i) => i.id === id);
     if (index === -1) return null;
-    invoices[index].status = status;
-    invoices[index].paymentDate = status === 'PAID' ? (paymentDate || new Date().toISOString().split('T')[0]) : undefined;
+
+    const inv = invoices[index];
+    let amountPaid = inv.amountPaid || 0;
+    let balanceDue = inv.balanceDue !== undefined ? inv.balanceDue : Math.max(0, inv.grandTotal - amountPaid);
+    let pDate = paymentDate || inv.paymentDate;
+
+    if (status === 'PAID') {
+      amountPaid = inv.grandTotal;
+      balanceDue = 0;
+      pDate = pDate || new Date().toISOString().split('T')[0];
+    } else if (status === 'OPEN') {
+      amountPaid = 0;
+      balanceDue = inv.grandTotal;
+      pDate = undefined;
+    }
+
+    const updated: Invoice = {
+      ...inv,
+      status,
+      amountPaid,
+      balanceDue,
+      paymentDate: pDate,
+    };
+
+    invoices[index] = updated;
     localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
     updateDoc(doc(db, COLLECTIONS.INVOICES, id), cleanForFirestore({
       status,
-      paymentDate: invoices[index].paymentDate || null
+      amountPaid,
+      balanceDue,
+      paymentDate: pDate || null
     })).catch((error) => {
       console.error('Error updating invoice status in Firestore:', error);
     });
 
-    return invoices[index];
+    return updated;
+  },
+
+  recordPayment(invoiceId: string, paymentData: Omit<PaymentRecord, 'id' | 'recordedAt'>): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const newPayment: PaymentRecord = {
+      ...paymentData,
+      id: 'pmt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      recordedAt: new Date().toISOString()
+    };
+
+    const existingPayments = invoice.payments || [];
+    const updatedPayments = [...existingPayments, newPayment];
+    const amountPaid = updatedPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, invoice.grandTotal - amountPaid);
+
+    let newStatus: InvoiceStatus = 'OPEN';
+    if (amountPaid >= invoice.grandTotal - 0.001 && invoice.grandTotal > 0) {
+      newStatus = 'PAID';
+    } else if (amountPaid > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    }
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      payments: updatedPayments,
+      amountPaid,
+      balanceDue,
+      status: newStatus,
+      paymentDate: newStatus === 'PAID'
+        ? (newPayment.date || invoice.paymentDate || new Date().toISOString().split('T')[0])
+        : (amountPaid > 0 ? (newPayment.date || invoice.paymentDate) : undefined)
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error recording payment to Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  updatePayment(invoiceId: string, paymentId: string, updates: Partial<PaymentRecord>): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const existingPayments = invoice.payments || [];
+    const pIndex = existingPayments.findIndex((p) => p.id === paymentId);
+    if (pIndex === -1) return null;
+
+    const updatedPayments = [...existingPayments];
+    updatedPayments[pIndex] = { ...updatedPayments[pIndex], ...updates };
+
+    const amountPaid = updatedPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, invoice.grandTotal - amountPaid);
+
+    let newStatus: InvoiceStatus = 'OPEN';
+    if (amountPaid >= invoice.grandTotal - 0.001 && invoice.grandTotal > 0) {
+      newStatus = 'PAID';
+    } else if (amountPaid > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    }
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      payments: updatedPayments,
+      amountPaid,
+      balanceDue,
+      status: newStatus,
+      paymentDate: newStatus === 'PAID'
+        ? (updatedPayments[updatedPayments.length - 1]?.date || invoice.paymentDate || new Date().toISOString().split('T')[0])
+        : (amountPaid > 0 ? (updatedPayments[updatedPayments.length - 1]?.date || invoice.paymentDate) : undefined)
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error updating payment in Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  deletePayment(invoiceId: string, paymentId: string): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const existingPayments = invoice.payments || [];
+    const updatedPayments = existingPayments.filter((p) => p.id !== paymentId);
+
+    const amountPaid = updatedPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, invoice.grandTotal - amountPaid);
+
+    let newStatus: InvoiceStatus = 'OPEN';
+    if (amountPaid >= invoice.grandTotal - 0.001 && invoice.grandTotal > 0) {
+      newStatus = 'PAID';
+    } else if (amountPaid > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    }
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      payments: updatedPayments,
+      amountPaid,
+      balanceDue,
+      status: newStatus,
+      paymentDate: newStatus === 'PAID' ? invoice.paymentDate : (amountPaid > 0 ? invoice.paymentDate : undefined)
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error deleting payment from Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  addAttachment(invoiceId: string, attachment: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const newAttachment: InvoiceAttachment = {
+      ...attachment,
+      id: 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      uploadedAt: new Date().toISOString(),
+    };
+
+    const existingAttachments = invoice.attachments || [];
+    const updatedAttachments = [...existingAttachments, newAttachment];
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      attachments: updatedAttachments
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error saving attachment to Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  addAttachments(invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>): Invoice | null {
+    if (!attachments || attachments.length === 0) return null;
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const newAttachments: InvoiceAttachment[] = attachments.map((att, idx) => ({
+      ...att,
+      id: 'att_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 7),
+      uploadedAt: new Date().toISOString(),
+    }));
+
+    const existingAttachments = invoice.attachments || [];
+    const updatedAttachments = [...existingAttachments, ...newAttachments];
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      attachments: updatedAttachments
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error saving attachments to Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  removeAttachment(invoiceId: string, attachmentId: string): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const existingAttachments = invoice.attachments || [];
+    const updatedAttachments = existingAttachments.filter((a) => a.id !== attachmentId);
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      attachments: updatedAttachments
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error removing attachment from Firestore:', error);
+    });
+
+    return updatedInvoice;
   },
 
   deleteInvoice(id: string): boolean {

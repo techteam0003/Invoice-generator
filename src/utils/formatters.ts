@@ -53,3 +53,24 @@ export function getTodayDateString(): string {
   const dd = String(today.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 }
+
+export function downloadAttachment(att: { name: string; dataUrl: string }): void {
+  try {
+    const link = document.createElement('a');
+    link.href = att.dataUrl;
+    link.download = att.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (error) {
+    console.error('Download failed:', error);
+  }
+}
+
+export function downloadAllAttachments(attachments: Array<{ name: string; dataUrl: string }>): void {
+  attachments.forEach((att, idx) => {
+    setTimeout(() => {
+      downloadAttachment(att);
+    }, idx * 250);
+  });
+}

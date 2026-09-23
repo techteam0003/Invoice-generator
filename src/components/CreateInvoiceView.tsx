@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FilePlus2,
   Building,
@@ -17,9 +17,15 @@ import {
   Edit3,
   Save,
   XCircle,
-  Clock
+  Clock,
+  CreditCard,
+  Paperclip,
+  UploadCloud,
+  FileText,
+  Download,
+  Image as ImageIcon
 } from 'lucide-react';
-import { Invoice, InvoiceItem, InvoiceStatus, Vendor, TaxType, TaxConfig } from '../types';
+import { Invoice, InvoiceItem, InvoiceStatus, Vendor, TaxType, TaxConfig, PaymentRecord, InvoiceAttachment } from '../types';
 import { MasterInvoiceSheet } from './MasterInvoiceSheet';
 import { getTodayDateString, formatDateToDisplay, formatRawAmount, formatCurrency } from '../utils/formatters';
 
@@ -55,9 +61,19 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
   const [invoiceDate, setInvoiceDate] = useState(getTodayDateString());
   const [dueDate, setDueDate] = useState('Net 7 days');
 
-  // Status & Payment Date (especially for editing)
+  // Status & Payment Management
   const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus>('OPEN');
-  const [paymentDate, setPaymentDate] = useState<string>('');
+  const [paymentDate, setPaymentDate] = useState<string>(getTodayDateString());
+  const [amountPaid, setAmountPaid] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<string>('Bank Transfer');
+  const [paymentReference, setPaymentReference] = useState<string>('');
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
+  const [paymentsList, setPaymentsList] = useState<PaymentRecord[]>([]);
+
+  // Attachments (Images & PDFs)
+  const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const attachmentFileInputRef = useRef<HTMLInputElement>(null);
 
   // 2. Vendor Selection & Bill To
   const [selectedVendorId, setSelectedVendorId] = useState<string>('');
@@ -92,7 +108,27 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       setInvoiceDate(editingInvoice.invoiceDate || getTodayDateString());
       setDueDate(editingInvoice.dueDate || 'Net 7 days');
       setInvoiceStatus(editingInvoice.status || 'OPEN');
-      setPaymentDate(editingInvoice.paymentDate || '');
+      setPaymentDate(editingInvoice.paymentDate || getTodayDateString());
+      
+      const existingPayments = editingInvoice.payments || [];
+      setPaymentsList(existingPayments);
+      if (editingInvoice.amountPaid !== undefined) {
+        setAmountPaid(editingInvoice.amountPaid.toString());
+      } else if (existingPayments.length > 0) {
+        const sum = existingPayments.reduce((acc, p) => acc + (p.amount || 0), 0);
+        setAmountPaid(sum.toString());
+      } else {
+        setAmountPaid(editingInvoice.status === 'PAID' ? editingInvoice.grandTotal.toString() : '');
+      }
+
+      if (existingPayments.length > 0) {
+        const latest = existingPayments[existingPayments.length - 1];
+        setPaymentMethod(latest.method || 'Bank Transfer');
+        setPaymentReference(latest.reference || '');
+        setPaymentNotes(latest.notes || '');
+      }
+
+      setAttachments(editingInvoice.attachments || []);
       setSelectedVendorId(editingInvoice.vendorId || '');
       setTaxType(editingInvoice.taxType || 'HST');
       setCustomTaxRate(editingInvoice.taxRate || 13.0);
@@ -119,7 +155,13 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
         setSelectedVendorId(vendors[0].id);
       }
       setInvoiceStatus('OPEN');
-      setPaymentDate('');
+      setPaymentDate(getTodayDateString());
+      setAmountPaid('');
+      setPaymentMethod('Bank Transfer');
+      setPaymentReference('');
+      setPaymentNotes('');
+      setPaymentsList([]);
+      setAttachments([]);
       if (!invoiceNumber) {
         const yearSuffix = new Date().getFullYear().toString().slice(-2);
         const randomNum = Math.floor(1000 + Math.random() * 9000);
@@ -226,6 +268,118 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     };
   }, [subtotal, taxType, customTaxRate]);
 
+  // File Upload Handlers for Attachments (Supports multiple files at once)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+
+    const oversizedFiles: string[] = [];
+    const validFiles: File[] = files.filter((file: File) => {
+      if (file.size > 1.5 * 1024 * 1024) {
+        oversizedFiles.push(file.name);
+        return false;
+      }
+      return true;
+    });
+
+    if (oversizedFiles.length > 0) {
+      setAttachmentError(`Skipped ${oversizedFiles.length} file(s) exceeding 1.5MB limit: ${oversizedFiles.join(', ')}`);
+    } else {
+      setAttachmentError(null);
+    }
+
+    if (validFiles.length === 0) {
+      if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
+      return;
+    }
+
+    const readPromises = validFiles.map((file: File) => {
+      return new Promise<InvoiceAttachment>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          resolve({
+            id: 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+            name: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            dataUrl,
+            uploadedAt: new Date().toISOString(),
+          });
+        };
+        reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(readPromises)
+      .then((newAttachments) => {
+        setAttachments((prev) => [...prev, ...newAttachments]);
+        if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
+      })
+      .catch(() => {
+        setAttachmentError('Failed to process one or more files. Please try again.');
+        if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
+      });
+  };
+
+  const handleRemoveAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // Payment Calculation based on status
+  const { computedPaid, computedBalance, resolvedPayments } = useMemo(() => {
+    if (invoiceStatus === 'OPEN') {
+      return { computedPaid: 0, computedBalance: grandTotal, resolvedPayments: [] };
+    }
+    if (invoiceStatus === 'PAID') {
+      const baseList: PaymentRecord[] = paymentsList.length > 0 ? paymentsList : [
+        {
+          id: 'pmt_' + Date.now(),
+          amount: grandTotal,
+          date: paymentDate || invoiceDate,
+          method: paymentMethod || 'Bank Transfer',
+          reference: paymentReference.trim() || undefined,
+          notes: paymentNotes.trim() || undefined,
+          recordedAt: new Date().toISOString(),
+        }
+      ];
+      return { computedPaid: grandTotal, computedBalance: 0, resolvedPayments: baseList };
+    }
+
+    // PARTIALLY_PAID
+    const numPaid = parseFloat(amountPaid) || 0;
+    const clampedPaid = Math.min(grandTotal, Math.max(0, numPaid));
+    const balance = Math.max(0, grandTotal - clampedPaid);
+
+    let list: PaymentRecord[] = paymentsList;
+    if (list.length === 0 || (list.length === 1 && numPaid > 0)) {
+      list = [
+        {
+          id: list[0]?.id || ('pmt_' + Date.now()),
+          amount: clampedPaid,
+          date: paymentDate || invoiceDate,
+          method: paymentMethod || 'Bank Transfer',
+          reference: paymentReference.trim() || undefined,
+          notes: paymentNotes.trim() || undefined,
+          recordedAt: list[0]?.recordedAt || new Date().toISOString(),
+        }
+      ];
+    }
+
+    return { computedPaid: clampedPaid, computedBalance: balance, resolvedPayments: list };
+  }, [
+    invoiceStatus,
+    amountPaid,
+    grandTotal,
+    paymentDate,
+    paymentMethod,
+    paymentReference,
+    paymentNotes,
+    paymentsList,
+    invoiceDate
+  ]);
+
   // Draft invoice for live preview
   const draftInvoice: Invoice = useMemo(() => {
     return {
@@ -249,9 +403,13 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
       grandTotal,
       status: invoiceStatus,
-      paymentDate: invoiceStatus === 'PAID' ? (paymentDate || invoiceDate) : undefined,
+      paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
       createdAt: editingInvoice ? editingInvoice.createdAt : new Date().toISOString(),
       notes,
+      payments: resolvedPayments,
+      amountPaid: computedPaid,
+      balanceDue: computedBalance,
+      attachments,
     };
   }, [
     editingInvoice,
@@ -271,6 +429,10 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     qstAmount,
     grandTotal,
     notes,
+    resolvedPayments,
+    computedPaid,
+    computedBalance,
+    attachments,
   ]);
 
   // Validation and Generation / Updating
@@ -315,6 +477,18 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       }
     }
 
+    if (invoiceStatus === 'PARTIALLY_PAID') {
+      const numPaid = parseFloat(amountPaid);
+      if (isNaN(numPaid) || numPaid <= 0) {
+        setFormError('For a partially paid invoice, please enter the partial amount received (greater than $0.00).');
+        return;
+      }
+      if (numPaid >= grandTotal) {
+        setFormError('Partial payment amount cannot equal or exceed the grand total. Choose "PAID IN FULL" instead.');
+        return;
+      }
+    }
+
     // Prepare clean invoice payload
     const processedItems = items.map((item) => ({
       id: item.id,
@@ -346,8 +520,12 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
         qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
         grandTotal,
         status: invoiceStatus,
-        paymentDate: invoiceStatus === 'PAID' ? (paymentDate || invoiceDate) : undefined,
+        paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
         notes: notes.trim() || undefined,
+        payments: resolvedPayments,
+        amountPaid: computedPaid,
+        balanceDue: computedBalance,
+        attachments,
       };
 
       const updated = onUpdateInvoice(editingInvoice.id, updatedData);
@@ -375,8 +553,12 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
         qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
         grandTotal,
         status: invoiceStatus,
-        paymentDate: invoiceStatus === 'PAID' ? (paymentDate || invoiceDate) : undefined,
+        paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
         notes: notes.trim() || undefined,
+        payments: resolvedPayments,
+        amountPaid: computedPaid,
+        balanceDue: computedBalance,
+        attachments,
       };
 
       const created = onSaveInvoice(invoiceData);
@@ -559,66 +741,166 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                   </div>
                 </div>
 
-                {/* Edit Mode Status Selector */}
-                {editingInvoice && (
-                  <div className="pt-3 border-t border-slate-100">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Invoice Status
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInvoiceStatus('OPEN');
-                              setPaymentDate('');
-                            }}
-                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
-                              invoiceStatus === 'OPEN'
-                                ? 'bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-400/30'
-                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
-                            <Clock className="w-3.5 h-3.5 text-amber-600" />
-                            <span>OPEN / UNPAID</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInvoiceStatus('PAID');
-                              if (!paymentDate) {
-                                setPaymentDate(new Date().toISOString().split('T')[0]);
-                              }
-                            }}
-                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
-                              invoiceStatus === 'PAID'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-400/30'
-                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>PAID</span>
-                          </button>
+                {/* Payment Status & Payment Tracking Selector */}
+                <div className="pt-3 border-t border-slate-100">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Payment Status
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoiceStatus('OPEN');
+                            setAmountPaid('');
+                          }}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
+                            invoiceStatus === 'OPEN'
+                              ? 'bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-400/30'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <span>OPEN / UNPAID</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoiceStatus('PARTIALLY_PAID');
+                            if (!amountPaid || parseFloat(amountPaid) <= 0) {
+                              setAmountPaid((grandTotal * 0.5).toFixed(2));
+                            }
+                            if (!paymentDate) {
+                              setPaymentDate(getTodayDateString());
+                            }
+                          }}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
+                            invoiceStatus === 'PARTIALLY_PAID'
+                              ? 'bg-blue-50 text-blue-800 border-blue-300 ring-2 ring-blue-400/30'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <CreditCard className="w-3.5 h-3.5 text-blue-600" />
+                          <span>PARTIALLY PAID</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoiceStatus('PAID');
+                            setAmountPaid(grandTotal.toFixed(2));
+                            if (!paymentDate) {
+                              setPaymentDate(getTodayDateString());
+                            }
+                          }}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold transition border cursor-pointer flex items-center justify-center gap-1.5 ${
+                            invoiceStatus === 'PAID'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-400/30'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>PAID IN FULL</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Partial or Full Payment Fields */}
+                    {invoiceStatus !== 'OPEN' && (
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* Amount Paid / Received */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-xs font-bold text-slate-700">
+                                {invoiceStatus === 'PARTIALLY_PAID' ? 'Partial Amount Received ($)*' : 'Total Amount Paid ($)*'}
+                              </label>
+                              {invoiceStatus === 'PARTIALLY_PAID' && (
+                                <span className="text-[10px] text-slate-500">
+                                  Total Billed: ${formatRawAmount(grandTotal)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="relative">
+                              <span className="absolute left-3 top-2 text-slate-400 text-xs">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                max={grandTotal}
+                                disabled={invoiceStatus === 'PAID'}
+                                value={invoiceStatus === 'PAID' ? grandTotal.toFixed(2) : amountPaid}
+                                onChange={(e) => setAmountPaid(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full pl-6 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                            </div>
+                            {invoiceStatus === 'PARTIALLY_PAID' && (
+                              <div className="mt-1 flex items-center justify-between text-[11px]">
+                                <span className="text-slate-500">Remaining Balance:</span>
+                                <span className="font-mono font-bold text-amber-700">
+                                  ${formatRawAmount(computedBalance)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Payment Date */}
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Payment Date Received*
+                            </label>
+                            <input
+                              type="date"
+                              value={paymentDate}
+                              onChange={(e) => setPaymentDate(e.target.value)}
+                              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* Payment Method */}
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Payment Method
+                            </label>
+                            <select
+                              value={paymentMethod}
+                              onChange={(e) => setPaymentMethod(e.target.value)}
+                              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                              <option value="Bank Transfer">Bank Transfer</option>
+                              <option value="Interac / e-Transfer">Interac / e-Transfer</option>
+                              <option value="Cheque">Cheque</option>
+                              <option value="Cash">Cash</option>
+                              <option value="Credit Card">Credit Card</option>
+                              <option value="Debit Card">Debit Card</option>
+                              <option value="Wire Transfer">Wire Transfer</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+
+                          {/* Reference / Cheque # */}
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Reference / Cheque # (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={paymentReference}
+                              onChange={(e) => setPaymentReference(e.target.value)}
+                              placeholder="e.g. Cheque #558, e-Transfer confirmation"
+                              className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
                         </div>
                       </div>
-
-                      {invoiceStatus === 'PAID' && (
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">
-                            Payment Received Date
-                          </label>
-                          <input
-                            type="date"
-                            value={paymentDate}
-                            onChange={(e) => setPaymentDate(e.target.value)}
-                            className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          />
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
 
               {/* Card 2: Bill To / Vendor Selection */}
@@ -928,6 +1210,132 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                     <span className="text-base font-mono text-emerald-400">
                       ${formatRawAmount(grandTotal)}
                     </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 5: Attachments (Images & PDFs) & Notes */}
+              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px]">
+                      5
+                    </span>
+                    Attachments & Supporting Documents
+                  </h3>
+                  <span className="text-[11px] text-slate-400">PDFs, Receipts, Images</span>
+                </div>
+
+                {/* Upload area */}
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 border border-dashed border-slate-300 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                        <Paperclip className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">Upload Attachments (Images or PDFs)</p>
+                        <p className="text-[11px] text-slate-500">Supports PNG, JPG, JPEG, WEBP, and PDF files (select one or multiple files, up to 1.5MB each)</p>
+                      </div>
+                    </div>
+                    <div>
+                      <input
+                        ref={attachmentFileInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*,application/pdf"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="invoice-file-upload-input"
+                      />
+                      <label
+                        htmlFor="invoice-file-upload-input"
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-2 cursor-pointer shadow-xs inline-flex"
+                      >
+                        <UploadCloud className="w-4 h-4" />
+                        <span>Upload Files</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {attachmentError && (
+                    <p className="text-xs font-medium text-rose-600 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{attachmentError}</span>
+                    </p>
+                  )}
+
+                  {/* Attached files list */}
+                  {attachments.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                      {attachments.map((att) => {
+                        const isPdf = att.type?.includes('pdf') || att.name.toLowerCase().endsWith('.pdf');
+                        const isImage = att.type?.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(att.name);
+                        const sizeKb = Math.round(att.size / 1024);
+
+                        return (
+                          <div
+                            key={att.id}
+                            className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg shadow-2xs hover:border-slate-300 transition"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                              <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">
+                                {isImage && att.dataUrl ? (
+                                  <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                                ) : isPdf ? (
+                                  <FileText className="w-5 h-5 text-rose-600" />
+                                ) : (
+                                  <Paperclip className="w-5 h-5 text-slate-500" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-slate-900 truncate" title={att.name}>
+                                  {att.name}
+                                </p>
+                                <p className="text-[10px] text-slate-500">
+                                  {sizeKb > 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`} • {isPdf ? 'PDF' : isImage ? 'Image' : 'File'}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {att.dataUrl && (
+                                <a
+                                  href={att.dataUrl}
+                                  download={att.name}
+                                  title="Download attachment"
+                                  className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAttachment(att.id)}
+                                title="Remove attachment"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Notes */}
+                  <div className="pt-2">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Invoice Notes / Special Remarks (Optional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="e.g. Please send payment via Interac e-Transfer or direct deposit to our bank account."
+                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
                   </div>
                 </div>
               </div>
