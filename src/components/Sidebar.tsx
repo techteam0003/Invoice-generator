@@ -20,6 +20,7 @@ interface SidebarProps {
   paidCount: number;
   vendorCount: number;
   totalInvoiceCount: number;
+  expenseCount?: number;
   onLogout: () => void;
   username: string;
 }
@@ -31,6 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   paidCount,
   vendorCount,
   totalInvoiceCount,
+  expenseCount = 0,
   onLogout,
   username,
 }) => {
@@ -181,6 +183,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {paidCount > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               {paidCount}
+            </span>
+          )}
+        </button>
+
+        {/* Expenses Group */}
+        <div className="pt-4 pb-1 px-3 text-[11px] uppercase font-semibold text-slate-500 tracking-wider">
+          Financial Outlays
+        </div>
+
+        {/* Expenses */}
+        <button
+          id="nav-expenses"
+          onClick={() => onTabChange('expenses')}
+          className={`w-full flex items-center justify-between p-3 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${
+            activeTab === 'expenses'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
+              : 'text-slate-300 opacity-70 hover:opacity-100 hover:bg-slate-800'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <ReceiptText className="w-4 h-4 text-rose-400" />
+            <span>Expenses & Outlays</span>
+          </div>
+          {expenseCount > 0 && (
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                activeTab === 'expenses' ? 'bg-white/20 text-white' : 'bg-slate-800 text-rose-300 border border-rose-500/20'
+              }`}
+            >
+              {expenseCount}
             </span>
           )}
         </button>

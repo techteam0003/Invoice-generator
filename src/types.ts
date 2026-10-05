@@ -98,4 +98,39 @@ export type ActiveNavTab =
   | 'all-invoices'
   | 'open-invoices'
   | 'paid-invoices'
+  | 'expenses'
   | 'settings';
+
+export interface ExpenseAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;          // mime type: image/png, image/jpeg, application/pdf, etc.
+  dataUrl: string;       // base64 data url
+  uploadedAt: string;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  color?: string;
+  isDefault?: boolean;
+  createdAt: string;
+}
+
+export interface Expense {
+  id: string;
+  title: string;                 // Description of expense e.g. "Tow Truck Transport Montreal-Toronto"
+  amount: number;                // Total amount in CAD/USD
+  category: string;              // Category name (custom or predefined)
+  categoryId?: string;           // Optional reference ID
+  date: string;                  // YYYY-MM-DD
+  paymentMethod: string;         // 'Credit Card' | 'Bank Transfer' | 'Cash' | 'Cheque' | 'Interac / e-Transfer' | 'Debit' | 'Other'
+  payee?: string;                // Who received payment (e.g. "CAA Towing", "SAAQ", "Petro-Canada")
+  reference?: string;            // Receipt #, Transaction Ref, Check #
+  notes?: string;
+  taxAmount?: number;            // Optional HST/GST/QST included
+  taxDeductible?: boolean;
+  attachments?: ExpenseAttachment[]; // Receipt image or document
+  createdAt: string;
+}

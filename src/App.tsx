@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { storage } from './services/storage';
-import { Invoice, Vendor, TaxConfig, ActiveNavTab, PaymentRecord, InvoiceAttachment } from './types';
+import { Invoice, Vendor, TaxConfig, ActiveNavTab, PaymentRecord, InvoiceAttachment, Expense, ExpenseCategory } from './types';
 import { LoginView } from './components/LoginView';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { VendorManager } from './components/VendorManager';
 import { CreateInvoiceView } from './components/CreateInvoiceView';
 import { InvoiceListView } from './components/InvoiceListView';
+import { ExpenseManagerView } from './components/ExpenseManagerView';
 import { SettingsView } from './components/SettingsView';
 import { InvoicePreviewModal } from './components/InvoicePreviewModal';
 import { downloadInvoicePDF } from './utils/pdfGenerator';
@@ -18,7 +19,8 @@ import {
   Search,
   CheckCircle2,
   Building,
-  Shield
+  Shield,
+  Receipt
 } from 'lucide-react';
 
 export default function App() {
@@ -34,6 +36,8 @@ export default function App() {
   // 3. Database State with Real-Time Firestore Synchronization
   const [invoices, setInvoices] = useState<Invoice[]>(() => storage.getInvoices());
   const [vendors, setVendors] = useState<Vendor[]>(() => storage.getVendors());
+  const [expenses, setExpenses] = useState<Expense[]>(() => storage.getExpenses());
+  const [categories, setCategories] = useState<ExpenseCategory[]>(() => storage.getCategories());
   const [taxConfig, setTaxConfig] = useState<TaxConfig>(() => storage.getTaxConfig());
   const [isDbConnected, setIsDbConnected] = useState(true);
 
@@ -52,6 +56,12 @@ export default function App() {
     const unsubInvoices = storage.subscribeInvoices((updatedInvoices) => {
       setInvoices(updatedInvoices);
     });
+    const unsubExpenses = storage.subscribeExpenses((updatedExpenses) => {
+      setExpenses(updatedExpenses);
+    });
+    const unsubCategories = storage.subscribeCategories((updatedCats) => {
+      setCategories(updatedCats);
+    });
     const unsubTax = storage.subscribeTaxConfig((updatedTax) => {
       setTaxConfig(updatedTax);
     });
@@ -59,6 +69,8 @@ export default function App() {
     return () => {
       unsubVendors();
       unsubInvoices();
+      unsubExpenses();
+      unsubCategories();
       unsubTax();
     };
   }, []);
@@ -252,10 +264,44 @@ export default function App() {
     showToast(`Attachment removed from invoice.`);
   };
 
+  // Expense handlers
+  const handleAddExpense = (expenseData: Omit<Expense, 'id' | 'createdAt'>) => {
+    const saved = storage.saveExpense(expenseData);
+    setExpenses(storage.getExpenses());
+    showToast(`Expense "${saved.title}" recorded & saved to database.`);
+  };
+
+  const handleUpdateExpense = (id: string, updates: Partial<Expense>) => {
+    storage.updateExpense(id, updates);
+    setExpenses(storage.getExpenses());
+    showToast('Expense details updated in database.');
+  };
+
+  const handleDeleteExpense = (id: string) => {
+    storage.deleteExpense(id);
+    setExpenses(storage.getExpenses());
+    showToast('Expense removed from database.');
+  };
+
+  const handleAddCategory = (name: string, color?: string): ExpenseCategory => {
+    const saved = storage.saveCategory(name, color);
+    setCategories(storage.getCategories());
+    showToast(`Category "${saved.name}" added.`);
+    return saved;
+  };
+
+  const handleDeleteCategory = (id: string) => {
+    storage.deleteCategory(id);
+    setCategories(storage.getCategories());
+    showToast('Category removed.');
+  };
+
   const handleResetData = async () => {
     await storage.resetAllData();
     setInvoices(storage.getInvoices());
     setVendors(storage.getVendors());
+    setExpenses(storage.getExpenses());
+    setCategories(storage.getCategories());
     setTaxConfig(storage.getTaxConfig());
     showToast('Database reset to master sample seed data.');
   };
@@ -294,6 +340,7 @@ export default function App() {
           paidCount={paidCount}
           vendorCount={vendors.length}
           totalInvoiceCount={invoices.length}
+          expenseCount={expenses.length}
           onLogout={handleLogout}
           username={auth.username}
         />
@@ -321,6 +368,7 @@ export default function App() {
               paidCount={paidCount}
               vendorCount={vendors.length}
               totalInvoiceCount={invoices.length}
+              expenseCount={expenses.length}
               onLogout={handleLogout}
               username={auth.username}
             />
@@ -385,6 +433,7 @@ export default function App() {
               <DashboardView
                 invoices={invoices}
                 vendors={vendors}
+                expenses={expenses}
                 onNavigate={(tab) => {
                   setActiveTab(tab);
                   if (tab !== 'create-invoice') {
@@ -498,6 +547,20 @@ export default function App() {
                 onAddAttachment={handleAddAttachment}
                 onAddAttachments={handleAddAttachments}
                 onRemoveAttachment={handleRemoveAttachment}
+              />
+            )}
+
+            {activeTab === 'expenses' && (
+              <ExpenseManagerView
+                expenses={expenses}
+                categories={categories}
+                vendors={vendors}
+                invoices={invoices}
+                onAddExpense={handleAddExpense}
+                onUpdateExpense={handleUpdateExpense}
+                onDeleteExpense={handleDeleteExpense}
+                onAddCategory={handleAddCategory}
+                onDeleteCategory={handleDeleteCategory}
               />
             )}
 

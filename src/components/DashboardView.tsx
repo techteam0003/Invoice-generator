@@ -11,13 +11,15 @@ import {
   Trash2,
   ArrowUpRight,
   TrendingUp,
+  TrendingDown,
   Building,
   Edit3,
   Paperclip,
   CreditCard,
+  Receipt,
   Image as ImageIcon
 } from 'lucide-react';
-import { Invoice, Vendor, ActiveNavTab, InvoiceAttachment } from '../types';
+import { Invoice, Vendor, ActiveNavTab, InvoiceAttachment, Expense } from '../types';
 import { formatCurrency, formatDateToDisplay, downloadAttachment, downloadAllAttachments } from '../utils/formatters';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { AttachmentViewerModal } from './AttachmentViewerModal';
@@ -26,6 +28,7 @@ import { storage } from '../services/storage';
 interface DashboardViewProps {
   invoices: Invoice[];
   vendors: Vendor[];
+  expenses?: Expense[];
   onNavigate: (tab: ActiveNavTab) => void;
   onViewInvoice: (invoice: Invoice) => void;
   onDownloadInvoice: (invoice: Invoice) => void;
@@ -40,6 +43,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   invoices,
   vendors,
+  expenses = [],
   onNavigate,
   onViewInvoice,
   onDownloadInvoice,
@@ -71,7 +75,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const totalTaxCollected = safeInvoices.reduce((acc, inv) => acc + (inv.taxAmount || 0), 0);
 
+  const safeExpenses = expenses || [];
+  const totalExpenses = safeExpenses.reduce((acc, exp) => acc + (Number(exp.amount) || 0), 0);
+  const netOperatingIncome = totalInvoiced - totalExpenses;
+
   const recentInvoices = safeInvoices.slice(0, 5);
+  const recentExpenses = safeExpenses.slice(0, 4);
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
 
   // Attachment interactive modal & popover state
@@ -108,6 +117,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>Create New Invoice</span>
           </button>
           <button
+            id="dash-expenses-btn"
+            onClick={() => onNavigate('expenses')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-rose-600/30 hover:bg-rose-600/40 active:bg-rose-600/50 text-white text-xs font-semibold rounded-lg border border-rose-400/30 transition cursor-pointer"
+          >
+            <Receipt className="w-4 h-4 text-rose-300" />
+            <span>Track Expenses ({safeExpenses.length})</span>
+          </button>
+          <button
             id="dash-manage-vendors-btn"
             onClick={() => onNavigate('vendors')}
             className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold rounded-lg border border-white/20 transition cursor-pointer"
@@ -118,8 +135,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Metrics Row (Invoices + Expenses + Net Profit) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Total Invoiced */}
         <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
@@ -183,21 +200,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Tax Collected / Vendors */}
-        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
+        {/* Total Business Expenses */}
+        <div
+          onClick={() => onNavigate('expenses')}
+          className="bg-white rounded-xl p-5 border border-rose-200 bg-rose-50/20 shadow-sm flex items-center justify-between cursor-pointer hover:border-rose-300 transition"
+        >
           <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Total Tax (HST/GST)
+            <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider flex items-center gap-1">
+              <span>Total Outlays</span>
+              <ArrowUpRight className="w-3 h-3" />
             </p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1 font-mono">
-              {formatCurrency(totalTaxCollected)}
+            <h3 className="text-2xl font-bold text-rose-900 mt-1 font-mono">
+              {formatCurrency(totalExpenses)}
             </h3>
-            <p className="text-[11px] text-slate-500 mt-1 font-medium flex items-center gap-1">
-              <Building className="w-3.5 h-3.5 text-slate-400" />
-              {vendors.length} registered vendors
+            <p className="text-[11px] text-rose-700 mt-1 font-semibold">
+              {safeExpenses.length} non-invoiced costs
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+            <TrendingDown className="w-6 h-6" />
+          </div>
+        </div>
+
+        {/* Net Operating Profit */}
+        <div className={`bg-white rounded-xl p-5 border shadow-sm flex items-center justify-between ${
+          netOperatingIncome >= 0 ? 'border-emerald-200 bg-emerald-50/30' : 'border-rose-200 bg-rose-50/30'
+        }`}>
+          <div>
+            <p className={`text-xs font-semibold uppercase tracking-wider ${
+              netOperatingIncome >= 0 ? 'text-emerald-800' : 'text-rose-800'
+            }`}>
+              Net Operating Profit
+            </p>
+            <h3 className={`text-2xl font-bold mt-1 font-mono ${
+              netOperatingIncome >= 0 ? 'text-emerald-950' : 'text-rose-950'
+            }`}>
+              {formatCurrency(netOperatingIncome)}
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1 font-medium">
+              Revenue - Outlays
+            </p>
+          </div>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+            netOperatingIncome >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+          }`}>
             <TrendingUp className="w-6 h-6" />
           </div>
         </div>
@@ -468,6 +514,89 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </button>
                         )}
                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Recent Business Outlays & Expenses Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-rose-500" />
+              <span>Recent Non-Invoiced Outlays & Expenses</span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              Operational expenses (towing, safety inspections, fuel, maintenance, licensing & custom categories)
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('expenses')}
+              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+            >
+              <span>Manage All Expenses</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {recentExpenses.length === 0 ? (
+          <div className="py-10 text-center text-slate-500">
+            <Receipt className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-slate-700">No expenses recorded yet</p>
+            <button
+              onClick={() => onNavigate('expenses')}
+              className="mt-2 text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
+            >
+              + Add an expense
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold text-[11px]">
+                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Description</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Payee</th>
+                  <th className="py-3 px-4">Payment Method</th>
+                  <th className="py-3 px-4 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {recentExpenses.map((exp) => (
+                  <tr key={exp.id} className="hover:bg-slate-50/70 transition">
+                    <td className="py-3 px-4 whitespace-nowrap text-slate-600 font-medium">
+                      {formatDateToDisplay(exp.date)}
+                    </td>
+                    <td className="py-3 px-4 font-semibold text-slate-900">
+                      {exp.title}
+                      {exp.reference && (
+                        <span className="text-[10px] text-slate-400 font-mono ml-2">
+                          #{exp.reference}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {exp.category}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap text-slate-600">
+                      {exp.payee || <span className="text-slate-300 italic">—</span>}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap text-slate-500">
+                      {exp.paymentMethod}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold text-slate-900">
+                      {formatCurrency(exp.amount)}
                     </td>
                   </tr>
                 ))}

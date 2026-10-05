@@ -10,13 +10,25 @@ import {
   Unsubscribe
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Invoice, Vendor, TaxConfig, PaymentRecord, InvoiceAttachment, InvoiceStatus } from '../types';
+import {
+  Invoice,
+  Vendor,
+  TaxConfig,
+  PaymentRecord,
+  InvoiceAttachment,
+  InvoiceStatus,
+  Expense,
+  ExpenseCategory,
+  ExpenseAttachment
+} from '../types';
 import { DEFAULT_TAX_CONFIG } from '../constants/companyInfo';
 
 const COLLECTIONS = {
   VENDORS: 'vendors',
   INVOICES: 'invoices',
-  SETTINGS: 'settings'
+  SETTINGS: 'settings',
+  EXPENSES: 'expenses',
+  EXPENSE_CATEGORIES: 'expense_categories'
 };
 
 const STORAGE_KEYS = {
@@ -24,6 +36,8 @@ const STORAGE_KEYS = {
   VENDORS: 'bk_invoice_manager_vendors_v1',
   TAX_CONFIG: 'bk_invoice_manager_tax_config_v1',
   AUTH: 'bk_invoice_manager_auth_v1',
+  EXPENSES: 'bk_invoice_manager_expenses_v1',
+  EXPENSE_CATEGORIES: 'bk_invoice_manager_expense_categories_v1'
 };
 
 /**
@@ -234,6 +248,51 @@ const SEED_INVOICES: Invoice[] = [
   }
 ];
 
+export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  { id: 'cat-1', name: 'Vehicle Inspection & Certifications', color: '#3B82F6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-2', name: 'Towing & Logistics / Transport', color: '#6366F1', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-3', name: 'Fuel & Travel Expenses', color: '#F59E0B', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-4', name: 'Repairs & Detailing', color: '#EC4899', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-5', name: 'Licensing, SAAQ & Registration', color: '#10B981', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-6', name: 'Office, Tools & Administrative', color: '#8B5CF6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-7', name: 'Software & Online Subscriptions', color: '#06B6D4', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-8', name: 'Legal & Professional Accounting', color: '#14B8A6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-9', name: 'Advertising & Marketing', color: '#F97316', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-10', name: 'Miscellaneous & Other', color: '#64748B', isDefault: true, createdAt: '2026-08-01T00:00:00Z' }
+];
+
+export const SEED_EXPENSES: Expense[] = [];
+
+export function normalizeExpense(data: any, id: string): Expense {
+  const attachments: ExpenseAttachment[] = Array.isArray(data.attachments)
+    ? data.attachments.map((att: any) => ({
+        id: att.id || 'exp_att_' + Math.random().toString(36).substring(2, 6),
+        name: att.name || 'receipt',
+        size: Number(att.size) || 0,
+        type: att.type || 'application/octet-stream',
+        dataUrl: att.dataUrl || '',
+        uploadedAt: att.uploadedAt || new Date().toISOString(),
+      }))
+    : [];
+
+  return {
+    id,
+    title: data.title || 'Untitled Expense',
+    amount: Number(data.amount) || 0,
+    category: data.category || 'Miscellaneous & Other',
+    categoryId: data.categoryId || undefined,
+    date: data.date || new Date().toISOString().split('T')[0],
+    paymentMethod: data.paymentMethod || 'Credit Card',
+    payee: data.payee || undefined,
+    reference: data.reference || undefined,
+    notes: data.notes || undefined,
+    taxAmount: data.taxAmount !== undefined && data.taxAmount !== null ? Number(data.taxAmount) : undefined,
+    taxDeductible: data.taxDeductible !== undefined ? Boolean(data.taxDeductible) : true,
+    attachments,
+    createdAt: data.createdAt || new Date().toISOString(),
+  };
+}
+
 export const storage = {
   // Real-time Firestore Subscriptions
   subscribeVendors(callback: (vendors: Vendor[]) => void): Unsubscribe {
@@ -341,6 +400,85 @@ export const storage = {
     }
   },
 
+  subscribeExpenses(callback: (expenses: Expense[]) => void): Unsubscribe {
+    try {
+      const q = query(collection(db, COLLECTIONS.EXPENSES));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            const local = this.getExpensesLocal();
+            callback(local);
+          } else {
+            const list: Expense[] = [];
+            snapshot.forEach((docSnap) => {
+              if (docSnap.id.startsWith('exp-seed-')) {
+                // Delete legacy dummy seed expense from Firestore
+                deleteDoc(doc(db, COLLECTIONS.EXPENSES, docSnap.id)).catch(() => {});
+                return;
+              }
+              const data = docSnap.data();
+              if (data) {
+                list.push(normalizeExpense(data, docSnap.id));
+              }
+            });
+            list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(list));
+            callback(list);
+          }
+        },
+        (error) => {
+          console.warn('Firestore expense subscription error, using local cache:', error);
+          callback(this.getExpensesLocal());
+        }
+      );
+    } catch (err) {
+      console.warn('Error establishing Firestore expense listener:', err);
+      callback(this.getExpensesLocal());
+      return () => {};
+    }
+  },
+
+  subscribeCategories(callback: (categories: ExpenseCategory[]) => void): Unsubscribe {
+    try {
+      const q = query(collection(db, COLLECTIONS.EXPENSE_CATEGORIES));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            const local = this.getCategoriesLocal();
+            callback(local);
+          } else {
+            const list: ExpenseCategory[] = [];
+            snapshot.forEach((docSnap) => {
+              const data = docSnap.data() as any;
+              if (data) {
+                list.push({
+                  id: docSnap.id,
+                  name: data.name || '',
+                  color: data.color || '#3B82F6',
+                  isDefault: Boolean(data.isDefault),
+                  createdAt: data.createdAt || new Date().toISOString()
+                });
+              }
+            });
+            list.sort((a, b) => a.name.localeCompare(b.name));
+            localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(list));
+            callback(list);
+          }
+        },
+        (error) => {
+          console.warn('Firestore category subscription error, using local cache:', error);
+          callback(this.getCategoriesLocal());
+        }
+      );
+    } catch (err) {
+      console.warn('Error establishing Firestore category listener:', err);
+      callback(this.getCategoriesLocal());
+      return () => {};
+    }
+  },
+
   async seedInitialFirestoreData(): Promise<void> {
     try {
       const vendorSnap = await getDocs(collection(db, COLLECTIONS.VENDORS));
@@ -356,6 +494,20 @@ export const storage = {
         const localInvoices = this.getInvoicesLocal();
         for (const inv of localInvoices) {
           await setDoc(doc(db, COLLECTIONS.INVOICES, inv.id), cleanForFirestore(inv));
+        }
+      }
+
+      // Clean up any remaining dummy seed expenses from Firestore
+      const dummyIds = ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'];
+      for (const dId of dummyIds) {
+        deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
+      }
+
+      const catSnap = await getDocs(collection(db, COLLECTIONS.EXPENSE_CATEGORIES));
+      if (catSnap.empty) {
+        const localCats = this.getCategoriesLocal();
+        for (const cat of localCats) {
+          await setDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, cat.id), cleanForFirestore(cat));
         }
       }
 
@@ -413,6 +565,42 @@ export const storage = {
     }
   },
 
+  getExpensesLocal(): Expense[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.EXPENSES);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
+        return [];
+      }
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
+        return [];
+      }
+      const clean = parsed
+        .filter((item: any) => item && !item.id?.startsWith('exp-seed-'))
+        .map((item: any) => normalizeExpense(item, item.id || 'exp_' + Math.random().toString(36).substring(2, 6)));
+      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(clean));
+      return clean;
+    } catch {
+      return [];
+    }
+  },
+
+  getCategoriesLocal(): ExpenseCategory[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.EXPENSE_CATEGORIES);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(DEFAULT_EXPENSE_CATEGORIES));
+        return DEFAULT_EXPENSE_CATEGORIES;
+      }
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : DEFAULT_EXPENSE_CATEGORIES;
+    } catch {
+      return DEFAULT_EXPENSE_CATEGORIES;
+    }
+  },
+
   // Synchronous convenience getters for instant initial render
   getVendors(): Vendor[] {
     return this.getVendorsLocal();
@@ -424,6 +612,18 @@ export const storage = {
 
   getInvoiceById(id: string): Invoice | null {
     return this.getInvoicesLocal().find((inv) => inv.id === id) || null;
+  },
+
+  getExpenses(): Expense[] {
+    return this.getExpensesLocal();
+  },
+
+  getExpenseById(id: string): Expense | null {
+    return this.getExpensesLocal().find((exp) => exp.id === id) || null;
+  },
+
+  getCategories(): ExpenseCategory[] {
+    return this.getCategoriesLocal();
   },
 
   getTaxConfig(): TaxConfig {
@@ -798,6 +998,93 @@ export const storage = {
     });
   },
 
+  // Expense CRUD operations (Persists to Firestore + Local Cache)
+  saveExpense(expenseData: Omit<Expense, 'id' | 'createdAt'>): Expense {
+    const rawId = 'exp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newExpense = normalizeExpense({
+      ...expenseData,
+      createdAt: new Date().toISOString()
+    }, rawId);
+
+    const expenses = this.getExpensesLocal();
+    expenses.unshift(newExpense);
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+
+    setDoc(doc(db, COLLECTIONS.EXPENSES, newExpense.id), cleanForFirestore(newExpense)).catch((error) => {
+      console.error('Error saving expense to Firestore:', error);
+    });
+
+    return newExpense;
+  },
+
+  updateExpense(id: string, updates: Partial<Expense>): Expense | null {
+    const expenses = this.getExpensesLocal();
+    const index = expenses.findIndex((e) => e.id === id);
+    if (index === -1) return null;
+
+    const merged = { ...expenses[index], ...updates };
+    const updated = normalizeExpense(merged, id);
+    expenses[index] = updated;
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+
+    setDoc(doc(db, COLLECTIONS.EXPENSES, id), cleanForFirestore(updated), { merge: true }).catch((error) => {
+      console.error('Error updating expense in Firestore:', error);
+    });
+
+    return updated;
+  },
+
+  deleteExpense(id: string): boolean {
+    const expenses = this.getExpensesLocal();
+    const filtered = expenses.filter((e) => e.id !== id);
+    if (filtered.length === expenses.length) return false;
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(filtered));
+
+    deleteDoc(doc(db, COLLECTIONS.EXPENSES, id)).catch((error) => {
+      console.error('Error deleting expense from Firestore:', error);
+    });
+
+    return true;
+  },
+
+  // Category CRUD operations
+  saveCategory(name: string, color?: string): ExpenseCategory {
+    const trimmed = name.trim();
+    const categories = this.getCategoriesLocal();
+    const existing = categories.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing;
+
+    const newCat: ExpenseCategory = {
+      id: 'cat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name: trimmed,
+      color: color || '#6366F1',
+      isDefault: false,
+      createdAt: new Date().toISOString()
+    };
+
+    categories.push(newCat);
+    localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(categories));
+
+    setDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, newCat.id), cleanForFirestore(newCat)).catch((error) => {
+      console.error('Error saving category to Firestore:', error);
+    });
+
+    return newCat;
+  },
+
+  deleteCategory(id: string): boolean {
+    const categories = this.getCategoriesLocal();
+    const filtered = categories.filter((c) => c.id !== id);
+    if (filtered.length === categories.length) return false;
+    localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(filtered));
+
+    deleteDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, id)).catch((error) => {
+      console.error('Error deleting category from Firestore:', error);
+    });
+
+    return true;
+  },
+
   getAuthSession(): { isAuthenticated: boolean; username: string } {
     try {
       const data = sessionStorage.getItem(STORAGE_KEYS.AUTH) || localStorage.getItem(STORAGE_KEYS.AUTH);
@@ -824,6 +1111,8 @@ export const storage = {
   async resetAllData(): Promise<void> {
     localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(SEED_VENDORS));
     localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(SEED_INVOICES));
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(DEFAULT_EXPENSE_CATEGORIES));
     localStorage.setItem(STORAGE_KEYS.TAX_CONFIG, JSON.stringify(DEFAULT_TAX_CONFIG));
 
     try {
@@ -833,9 +1122,33 @@ export const storage = {
       for (const inv of SEED_INVOICES) {
         await setDoc(doc(db, COLLECTIONS.INVOICES, inv.id), cleanForFirestore(inv));
       }
+      const dummyIds = ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'];
+      for (const dId of dummyIds) {
+        await deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
+      }
+      for (const cat of DEFAULT_EXPENSE_CATEGORIES) {
+        await setDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, cat.id), cleanForFirestore(cat));
+      }
       await setDoc(doc(db, COLLECTIONS.SETTINGS, 'tax_config'), cleanForFirestore(DEFAULT_TAX_CONFIG));
     } catch (e) {
       console.error('Error resetting Firestore data:', e);
     }
   }
 };
+
+// Immediate cleanup of any legacy dummy expenses from local storage and Firestore
+try {
+  const storedExpenses = localStorage.getItem(STORAGE_KEYS.EXPENSES);
+  if (storedExpenses) {
+    const parsed = JSON.parse(storedExpenses);
+    if (Array.isArray(parsed)) {
+      const filtered = parsed.filter((e: any) => e && !e.id?.startsWith('exp-seed-'));
+      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(filtered));
+    }
+  }
+  ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'].forEach((dId) => {
+    deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
+  });
+} catch (e) {
+  // ignore
+}
