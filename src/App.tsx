@@ -449,6 +449,7 @@ export default function App() {
                 onAddAttachment={handleAddAttachment}
                 onAddAttachments={handleAddAttachments}
                 onRemoveAttachment={handleRemoveAttachment}
+                onShowToast={showToast}
               />
             )}
 

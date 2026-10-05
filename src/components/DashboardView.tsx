@@ -4,6 +4,7 @@ import {
   Clock,
   CheckCircle2,
   FileText,
+  FileSpreadsheet,
   PlusCircle,
   Users,
   Download,
@@ -17,12 +18,16 @@ import {
   Paperclip,
   CreditCard,
   Receipt,
+  Landmark,
+  Percent,
+  Scale,
   Image as ImageIcon
 } from 'lucide-react';
 import { Invoice, Vendor, ActiveNavTab, InvoiceAttachment, Expense } from '../types';
 import { formatCurrency, formatDateToDisplay, downloadAttachment, downloadAllAttachments } from '../utils/formatters';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { AttachmentViewerModal } from './AttachmentViewerModal';
+import { InvoiceReportsAccounting } from './InvoiceReportsAccounting';
 import { storage } from '../services/storage';
 
 interface DashboardViewProps {
@@ -38,6 +43,7 @@ interface DashboardViewProps {
   onAddAttachment?: (invoiceId: string, attachment: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>) => void;
   onAddAttachments?: (invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>) => void;
   onRemoveAttachment?: (invoiceId: string, attachmentId: string) => void;
+  onShowToast?: (message: string, type?: 'success' | 'info') => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -53,6 +59,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onAddAttachment,
   onAddAttachments,
   onRemoveAttachment,
+  onShowToast,
 }) => {
   const safeInvoices = invoices || [];
   const safeVendors = vendors || [];
@@ -74,9 +81,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, 0);
 
   const totalTaxCollected = safeInvoices.reduce((acc, inv) => acc + (inv.taxAmount || 0), 0);
+  const taxCollectedRealized = safeInvoices.reduce((acc, inv) => {
+    if (inv.status === 'PAID') return acc + (inv.taxAmount || 0);
+    if (inv.amountPaid && inv.grandTotal > 0) {
+      return acc + (inv.amountPaid / inv.grandTotal) * (inv.taxAmount || 0);
+    }
+    return acc;
+  }, 0);
 
   const safeExpenses = expenses || [];
   const totalExpenses = safeExpenses.reduce((acc, exp) => acc + (Number(exp.amount) || 0), 0);
+  const totalTaxPaid = safeExpenses.reduce((acc, exp) => acc + (Number(exp.taxAmount) || 0), 0);
+  const expensesWithTaxCount = safeExpenses.filter((e) => Number(e.taxAmount) > 0).length;
+  const netTaxRemittance = totalTaxCollected - totalTaxPaid;
   const netOperatingIncome = totalInvoiced - totalExpenses;
 
   const recentInvoices = safeInvoices.slice(0, 5);
@@ -123,6 +140,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           >
             <Receipt className="w-4 h-4 text-rose-300" />
             <span>Track Expenses ({safeExpenses.length})</span>
+          </button>
+          <button
+            id="dash-reports-btn"
+            onClick={() => {
+              const el = document.getElementById('invoice-reports-accounting');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 active:bg-indigo-500/40 text-white text-xs font-semibold rounded-lg border border-indigo-400/30 transition cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
+            <span>Accounting Reports & CSV</span>
           </button>
           <button
             id="dash-manage-vendors-btn"
@@ -248,6 +276,86 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Tax Accounting Cards (Tax Collected & Tax Paid) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Tax Collected Card */}
+        <div className="bg-white rounded-xl p-5 border border-indigo-200 bg-indigo-50/20 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Landmark className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Tax Collected (Invoices)</span>
+            </p>
+            <h3 className="text-2xl font-bold text-slate-900 mt-1 font-mono">
+              {formatCurrency(totalTaxCollected)}
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1 font-medium">
+              HST/GST/QST on invoices ({formatCurrency(taxCollectedRealized)} collected)
+            </p>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
+            <Percent className="w-6 h-6" />
+          </div>
+        </div>
+
+        {/* Tax Paid Card */}
+        <div
+          onClick={() => onNavigate('expenses')}
+          className="bg-white rounded-xl p-5 border border-amber-200 bg-amber-50/20 shadow-sm flex items-center justify-between cursor-pointer hover:border-amber-300 transition"
+        >
+          <div>
+            <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Receipt className="w-3.5 h-3.5 text-amber-600" />
+              <span>Tax Paid (Expenses)</span>
+              <ArrowUpRight className="w-3 h-3 text-amber-600" />
+            </p>
+            <h3 className="text-2xl font-bold text-slate-900 mt-1 font-mono">
+              {formatCurrency(totalTaxPaid)}
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1 font-medium">
+              Input tax credits paid on business outlays ({expensesWithTaxCount} items)
+            </p>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+            <TrendingDown className="w-6 h-6" />
+          </div>
+        </div>
+
+        {/* Net Tax Remittance Card */}
+        <div className={`bg-white rounded-xl p-5 border shadow-sm flex items-center justify-between sm:col-span-2 lg:col-span-1 ${
+          netTaxRemittance >= 0 ? 'border-slate-200 bg-slate-50/40' : 'border-blue-200 bg-blue-50/20'
+        }`}>
+          <div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <Scale className="w-3.5 h-3.5 text-slate-600" />
+              <span>Net Tax Remittance</span>
+            </p>
+            <h3 className={`text-2xl font-bold mt-1 font-mono ${
+              netTaxRemittance >= 0 ? 'text-slate-900' : 'text-blue-900'
+            }`}>
+              {formatCurrency(netTaxRemittance)}
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1 font-medium">
+              {netTaxRemittance >= 0
+                ? 'Tax Collected − Tax Paid (Payable to Government)'
+                : 'Tax Paid > Tax Collected (Tax Refund Due)'}
+            </p>
+          </div>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+            netTaxRemittance >= 0 ? 'bg-slate-200/80 text-slate-700' : 'bg-blue-100 text-blue-700'
+          }`}>
+            <Scale className="w-6 h-6" />
+          </div>
+        </div>
+      </div>
+
+      {/* Invoice Reports & Accounting Module */}
+      <InvoiceReportsAccounting
+        invoices={safeInvoices}
+        vendors={safeVendors}
+        onViewInvoice={onViewInvoice}
+        onShowToast={onShowToast || ((msg) => console.log(msg))}
+      />
 
       {/* Recent Invoices Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

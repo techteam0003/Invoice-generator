@@ -9,7 +9,8 @@ import {
   Settings,
   LogOut,
   Building2,
-  ReceiptText
+  ReceiptText,
+  FileSpreadsheet
 } from 'lucide-react';
 import { ActiveNavTab } from '../types';
 
@@ -215,6 +216,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {expenseCount}
             </span>
           )}
+        </button>
+
+        {/* Invoice Reports & Accounting */}
+        <button
+          id="nav-reports"
+          onClick={() => {
+            onTabChange('dashboard');
+            setTimeout(() => {
+              const el = document.getElementById('invoice-reports-accounting');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+          }}
+          className="w-full flex items-center justify-between p-3 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer text-slate-300 opacity-70 hover:opacity-100 hover:bg-slate-800"
+        >
+          <div className="flex items-center gap-3">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>Reports & Accounting</span>
+          </div>
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            CSV
+          </span>
         </button>
 
         {/* Settings */}

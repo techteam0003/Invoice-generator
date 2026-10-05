@@ -245,6 +245,155 @@ const SEED_INVOICES: Invoice[] = [
     status: 'OPEN',
     createdAt: '2026-08-19T10:00:00Z',
     notes: 'Sample master reference invoice for vehicle locating'
+  },
+  {
+    id: 'inv-seed-2',
+    invoiceNumber: 'AR26-0905',
+    invoiceDate: 'September 5, 2026',
+    dueDate: 'Net 15 days',
+    vendorId: 'vendor-1',
+    vendor: {
+      companyName: 'WINDSOR MITSUBISHI LTD',
+      address: '1622 Sylvestre Dr, Tecumseh, ON N9K 0B9',
+      phone: '(519) 735-4422',
+      email: 'info@windsormitsubishi.com',
+    },
+    items: [
+      {
+        id: 'item-2-1',
+        title: 'Wholesale Dealer Locating & Acquisition',
+        subDetails: '2023 Honda CR-V Touring — VIN: 849201',
+        quantity: 2,
+        rate: 600.00,
+        amount: 1200.00,
+      },
+      {
+        id: 'item-2-2',
+        title: 'Logistics Coordination & Pre-Delivery Inspection Dispatch',
+        subDetails: '2x Units Windsor to London Regional Hub',
+        quantity: 2,
+        rate: 400.00,
+        amount: 800.00,
+      },
+      {
+        id: 'item-2-3',
+        title: 'Vehicle Sourcing/Locating Service Fee',
+        subDetails: '2024 Toyota RAV4 Hybrid — VIN: 194823',
+        quantity: 2,
+        rate: 600.00,
+        amount: 1200.00,
+      }
+    ],
+    subtotal: 3200.00,
+    taxType: 'HST',
+    taxRate: 13.0,
+    taxAmount: 416.00,
+    grandTotal: 3616.00,
+    status: 'PAID',
+    paymentDate: '2026-09-12',
+    amountPaid: 3616.00,
+    balanceDue: 0.00,
+    payments: [
+      {
+        id: 'pay-seed-1',
+        amount: 3616.00,
+        date: '2026-09-12',
+        method: 'Bank Transfer',
+        reference: 'EFT-883920-WIN',
+        notes: 'Full payment received via Electronic Funds Transfer',
+        recordedAt: '2026-09-12T14:30:00Z'
+      }
+    ],
+    createdAt: '2026-09-05T09:00:00Z',
+    notes: 'Payment confirmed in full via Direct Deposit EFT.'
+  },
+  {
+    id: 'inv-seed-3',
+    invoiceNumber: 'AR26-0918',
+    invoiceDate: 'September 18, 2026',
+    dueDate: 'Net 30 days',
+    vendorId: 'vendor-2',
+    vendor: {
+      companyName: 'MONTREAL AUTO PRESTIGE INC',
+      address: '4500 Boul Métropolitain E, Saint-Léonard, QC H1S 1K6',
+      phone: '(514) 321-9988',
+      email: 'contact@prestigeautoqc.com',
+    },
+    items: [
+      {
+        id: 'item-3-1',
+        title: 'Fleet Acquisition & Commercial Brokering Services',
+        subDetails: '5x Luxury Sedan Units — Dealer Consignment Lot',
+        quantity: 5,
+        rate: 1200.00,
+        amount: 6000.00,
+      },
+      {
+        id: 'item-3-2',
+        title: 'Specialty Transport & Inter-Provincial Certification',
+        subDetails: 'Quebec Safety Compliance & SAAQ Transit Validation',
+        quantity: 4,
+        rate: 1000.00,
+        amount: 4000.00,
+      }
+    ],
+    subtotal: 10000.00,
+    taxType: 'QUEBEC',
+    taxRate: 14.975,
+    taxAmount: 1497.50,
+    gstAmount: 500.00,
+    qstAmount: 997.50,
+    grandTotal: 11497.50,
+    status: 'PARTIALLY_PAID',
+    paymentDate: '2026-09-24',
+    amountPaid: 6000.00,
+    balanceDue: 5497.50,
+    payments: [
+      {
+        id: 'pay-seed-2',
+        amount: 6000.00,
+        date: '2026-09-24',
+        method: 'Cheque',
+        reference: 'CHQ #4492',
+        notes: 'First installment payment cleared',
+        recordedAt: '2026-09-24T16:00:00Z'
+      }
+    ],
+    createdAt: '2026-09-18T11:20:00Z',
+    notes: 'Quebec dual tax applied: GST 5% ($500.00) + QST 9.975% ($997.50). Partial payment received.'
+  },
+  {
+    id: 'inv-seed-4',
+    invoiceNumber: 'AR26-0928',
+    invoiceDate: 'September 28, 2026',
+    dueDate: 'Net 7 days',
+    vendorId: 'vendor-3',
+    vendor: {
+      companyName: 'TORONTO MOTORS GROUP',
+      address: '777 Dundas St W, Toronto, ON M6J 1V2',
+      phone: '(416) 555-0199',
+      email: 'accounting@torontomotors.ca',
+    },
+    items: [
+      {
+        id: 'item-4-1',
+        title: 'Auction Representation & Bid Execution',
+        subDetails: '2025 Lexus RX 350 AWD — Manheim Toronto Lot #442',
+        quantity: 2,
+        rate: 800.00,
+        amount: 1600.00,
+      }
+    ],
+    subtotal: 1600.00,
+    taxType: 'HST',
+    taxRate: 13.0,
+    taxAmount: 208.00,
+    grandTotal: 1808.00,
+    status: 'OPEN',
+    amountPaid: 0,
+    balanceDue: 1808.00,
+    createdAt: '2026-09-28T15:45:00Z',
+    notes: 'Invoice sent to accounts payable department.'
   }
 ];
 
@@ -546,7 +695,16 @@ export const storage = {
       }
       const parsed = JSON.parse(data);
       if (!Array.isArray(parsed)) return SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
-      return parsed.map((item) => normalizeInvoice(item, item.id || 'inv_' + Math.random().toString(36).substring(2, 6)));
+      const existingIds = new Set(parsed.map((item: any) => item?.id));
+      const merged = [...parsed];
+      for (const seedInv of SEED_INVOICES) {
+        if (!existingIds.has(seedInv.id)) {
+          merged.push(seedInv);
+        }
+      }
+      const normalized = merged.map((item) => normalizeInvoice(item, item.id || 'inv_' + Math.random().toString(36).substring(2, 6)));
+      localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(normalized));
+      return normalized;
     } catch {
       return SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
     }
@@ -577,8 +735,28 @@ export const storage = {
         localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
         return [];
       }
+      // Thoroughly remove any dummy/seed expenses added in previous sessions
       const clean = parsed
-        .filter((item: any) => item && !item.id?.startsWith('exp-seed-'))
+        .filter((item: any) => {
+          if (!item) return false;
+          const id = String(item.id || '');
+          if (id.startsWith('exp-seed-') || id.startsWith('dummy-')) return false;
+          const title = String(item.title || '').toLowerCase();
+          const payee = String(item.payee || '').toLowerCase();
+          if (
+            title.includes('tow truck') ||
+            title.includes('oil change') ||
+            title.includes('routine service') ||
+            title.includes('accounting & audit') ||
+            title.includes('seed') ||
+            payee.includes('caa') ||
+            payee.includes('saaq') ||
+            payee.includes('petro')
+          ) {
+            return false;
+          }
+          return true;
+        })
         .map((item: any) => normalizeExpense(item, item.id || 'exp_' + Math.random().toString(36).substring(2, 6)));
       localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(clean));
       return clean;
@@ -1142,7 +1320,26 @@ try {
   if (storedExpenses) {
     const parsed = JSON.parse(storedExpenses);
     if (Array.isArray(parsed)) {
-      const filtered = parsed.filter((e: any) => e && !e.id?.startsWith('exp-seed-'));
+      const filtered = parsed.filter((e: any) => {
+        if (!e) return false;
+        const id = String(e.id || '');
+        if (id.startsWith('exp-seed-') || id.startsWith('dummy-')) return false;
+        const title = String(e.title || '').toLowerCase();
+        const payee = String(e.payee || '').toLowerCase();
+        if (
+          title.includes('tow truck') ||
+          title.includes('oil change') ||
+          title.includes('routine service') ||
+          title.includes('accounting & audit') ||
+          title.includes('seed') ||
+          payee.includes('caa') ||
+          payee.includes('saaq') ||
+          payee.includes('petro')
+        ) {
+          return false;
+        }
+        return true;
+      });
       localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(filtered));
     }
   }
