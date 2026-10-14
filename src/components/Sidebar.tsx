@@ -221,20 +221,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Invoice Reports & Accounting */}
         <button
           id="nav-reports"
-          onClick={() => {
-            onTabChange('dashboard');
-            setTimeout(() => {
-              const el = document.getElementById('invoice-reports-accounting');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }, 100);
-          }}
-          className="w-full flex items-center justify-between p-3 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer text-slate-300 opacity-70 hover:opacity-100 hover:bg-slate-800"
+          onClick={() => onTabChange('reports')}
+          className={`w-full flex items-center justify-between p-3 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${
+            activeTab === 'reports'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
+              : 'text-slate-300 opacity-70 hover:opacity-100 hover:bg-slate-800'
+          }`}
         >
           <div className="flex items-center gap-3">
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <FileSpreadsheet className={`w-4 h-4 ${activeTab === 'reports' ? 'text-white' : 'text-emerald-400'}`} />
             <span>Reports & Accounting</span>
           </div>
-          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
+              activeTab === 'reports'
+                ? 'bg-white/20 text-white'
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            }`}
+          >
             CSV
           </span>
         </button>
@@ -264,12 +268,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-4 border-t border-slate-800 bg-slate-950">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-8 h-8 rounded-full bg-indigo-900/60 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold text-xs">
-              {username}
+            <div className="w-8 h-8 rounded-full bg-indigo-900/60 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold text-xs uppercase shrink-0">
+              {username ? username.slice(0, 2).toUpperCase() : 'BK'}
             </div>
             <div className="text-xs overflow-hidden">
               <p className="font-medium text-white truncate">{username} (Admin)</p>
-              <p className="text-[10px] text-slate-400">System ID: 4737</p>
+              <p className="text-[10px] text-slate-400">Authorized Session</p>
             </div>
           </div>
           <button

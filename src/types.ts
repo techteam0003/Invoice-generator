@@ -99,6 +99,7 @@ export type ActiveNavTab =
   | 'open-invoices'
   | 'paid-invoices'
   | 'expenses'
+  | 'reports'
   | 'settings';
 
 export interface ExpenseAttachment {

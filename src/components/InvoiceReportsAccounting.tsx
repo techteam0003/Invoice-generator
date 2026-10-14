@@ -944,104 +944,125 @@ export const InvoiceReportsAccounting: React.FC<InvoiceReportsAccountingProps> =
           </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-9 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-5 gap-3.5">
           {/* 1. Total Invoices */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">
               Total Invoices
             </p>
-            <h4 className="text-xl font-bold text-slate-900 mt-1 font-mono">
+            <h4 className="text-2xl font-bold text-slate-900 mt-1 font-mono tracking-tight truncate">
               {accountingSummary.totalInvoices}
             </h4>
-            <p className="text-[10px] text-slate-400 mt-0.5 truncate">Records matching</p>
+            <p className="text-[11px] text-slate-400 mt-1 truncate">Records in scope</p>
           </div>
 
           {/* 2. Total Invoice Value */}
-          <div className="bg-white p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/20 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-indigo-200 bg-indigo-50/20 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider truncate">
               Total Value
             </p>
-            <h4 className="text-xl font-bold text-indigo-950 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-indigo-950 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalInvoiced)}
+            >
               {formatCurrency(accountingSummary.totalInvoiced)}
             </h4>
-            <p className="text-[10px] text-indigo-600 mt-0.5">Gross invoiced</p>
+            <p className="text-[11px] text-indigo-600 mt-1 truncate">Gross invoiced</p>
           </div>
 
           {/* 3. Total Paid */}
-          <div className="bg-white p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-emerald-200 bg-emerald-50/20 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider truncate">
               Total Paid
             </p>
-            <h4 className="text-xl font-bold text-emerald-950 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-emerald-950 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalPaid)}
+            >
               {formatCurrency(accountingSummary.totalPaid)}
             </h4>
-            <p className="text-[10px] text-emerald-600 mt-0.5">Funds collected</p>
+            <p className="text-[11px] text-emerald-600 mt-1 truncate">Funds collected</p>
           </div>
 
           {/* 4. Total Pending */}
-          <div className="bg-white p-3.5 rounded-xl border border-amber-200 bg-amber-50/20 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-amber-200 bg-amber-50/20 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider truncate">
               Total Pending
             </p>
-            <h4 className="text-xl font-bold text-amber-950 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-amber-950 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalPending)}
+            >
               {formatCurrency(accountingSummary.totalPending)}
             </h4>
-            <p className="text-[10px] text-amber-600 mt-0.5">Awaiting settlement</p>
+            <p className="text-[11px] text-amber-600 mt-1 truncate">Awaiting settlement</p>
           </div>
 
           {/* 5. Total Overdue */}
-          <div className="bg-white p-3.5 rounded-xl border border-rose-200 bg-rose-50/20 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-rose-200 bg-rose-50/20 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider truncate">
               Total Overdue
             </p>
-            <h4 className="text-xl font-bold text-rose-950 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-rose-950 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalOverdue)}
+            >
               {formatCurrency(accountingSummary.totalOverdue)}
             </h4>
-            <p className="text-[10px] text-rose-600 mt-0.5">{accountingSummary.overdueCount} overdue</p>
+            <p className="text-[11px] text-rose-600 mt-1 truncate">{accountingSummary.overdueCount} overdue invoices</p>
           </div>
 
           {/* 6. Total Tax */}
-          <div className="bg-white p-3.5 rounded-xl border border-purple-200 bg-purple-50/20 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-purple-200 bg-purple-50/20 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider truncate">
               Total Tax
             </p>
-            <h4 className="text-xl font-bold text-purple-950 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-purple-950 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalTax)}
+            >
               {formatCurrency(accountingSummary.totalTax)}
             </h4>
-            <p className="text-[10px] text-purple-600 mt-0.5">HST / GST / QST</p>
+            <p className="text-[11px] text-purple-600 mt-1 truncate">HST / GST / QST</p>
           </div>
 
           {/* 7. Total Discounts */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">
               Discounts
             </p>
-            <h4 className="text-xl font-bold text-slate-900 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalDiscounts)}
+            >
               {formatCurrency(accountingSummary.totalDiscounts)}
             </h4>
-            <p className="text-[10px] text-slate-400 mt-0.5">Deductions</p>
+            <p className="text-[11px] text-slate-400 mt-1 truncate">Deductions applied</p>
           </div>
 
           {/* 8. Total Outstanding */}
-          <div className="bg-white p-3.5 rounded-xl border border-blue-200 bg-blue-50/20 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-blue-200 bg-blue-50/20 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider truncate">
               Outstanding
             </p>
-            <h4 className="text-xl font-bold text-blue-950 mt-1 font-mono">
+            <h4
+              className="text-xl sm:text-2xl font-bold text-blue-950 mt-1 font-mono tracking-tight truncate"
+              title={formatCurrency(accountingSummary.totalOutstanding)}
+            >
               {formatCurrency(accountingSummary.totalOutstanding)}
             </h4>
-            <p className="text-[10px] text-blue-600 mt-0.5">Net balance due</p>
+            <p className="text-[11px] text-blue-600 mt-1 truncate">Net balance due</p>
           </div>
 
           {/* 9. Total Number of Customers/Vendors */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">
               Clients / Vendors
             </p>
-            <h4 className="text-xl font-bold text-slate-900 mt-1 font-mono">
+            <h4 className="text-2xl font-bold text-slate-900 mt-1 font-mono tracking-tight truncate">
               {accountingSummary.totalVendors}
             </h4>
-            <p className="text-[10px] text-slate-400 mt-0.5">Active in period</p>
+            <p className="text-[11px] text-slate-400 mt-1 truncate">Active in period</p>
           </div>
         </div>
       </div>
@@ -1192,7 +1213,7 @@ export const InvoiceReportsAccounting: React.FC<InvoiceReportsAccountingProps> =
         </div>
 
         {/* Dynamic Tax Rates Table */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto table-scroll-container">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
@@ -1293,7 +1314,7 @@ export const InvoiceReportsAccounting: React.FC<InvoiceReportsAccountingProps> =
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto table-scroll-container">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
@@ -1459,7 +1480,7 @@ export const InvoiceReportsAccounting: React.FC<InvoiceReportsAccountingProps> =
         </div>
 
         {/* Detailed Table */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto table-scroll-container">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">

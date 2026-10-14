@@ -182,220 +182,7 @@ const SEED_VENDORS: Vendor[] = [
   }
 ];
 
-const SEED_INVOICES: Invoice[] = [
-  {
-    id: 'inv-seed-1',
-    invoiceNumber: 'AR26-0812',
-    invoiceDate: 'August 19, 2026',
-    dueDate: 'Net 7 days',
-    vendorId: 'vendor-1',
-    vendor: {
-      companyName: 'WINDSOR MITSUBISHI LTD',
-      address: '1622 Sylvestre Dr, Tecumseh, ON N9K 0B9',
-      phone: '(519) 735-4422',
-      email: 'info@windsormitsubishi.com',
-    },
-    items: [
-      {
-        id: 'item-1',
-        title: 'Vehicle Sourcing/Locating Service Fee',
-        subDetails: '2024 Subaru Crosstrek — VIN: 393477',
-        quantity: 1,
-        rate: 400.00,
-        amount: 400.00,
-      },
-      {
-        id: 'item-2',
-        title: 'Vehicle Sourcing/Locating Service Fee',
-        subDetails: '2024 Mazda CX-5 — VIN: 359332',
-        quantity: 1,
-        rate: 400.00,
-        amount: 400.00,
-      },
-      {
-        id: 'item-3',
-        title: 'Vehicle Sourcing/Locating Service Fee',
-        subDetails: '2023 Mitsubishi RVR — VIN: 602641',
-        quantity: 1,
-        rate: 400.00,
-        amount: 400.00,
-      },
-      {
-        id: 'item-4',
-        title: 'Vehicle Sourcing/Locating Service Fee',
-        subDetails: '2022 Mitsubishi RVR — VIN: 603423',
-        quantity: 1,
-        rate: 400.00,
-        amount: 400.00,
-      },
-      {
-        id: 'item-5',
-        title: 'Vehicle Sourcing/Locating Service Fee',
-        subDetails: '2022 Mitsubishi RVR — VIN: 603867',
-        quantity: 1,
-        rate: 400.00,
-        amount: 400.00,
-      }
-    ],
-    subtotal: 2000.00,
-    taxType: 'HST',
-    taxRate: 13.0,
-    taxAmount: 260.00,
-    grandTotal: 2260.00,
-    status: 'OPEN',
-    createdAt: '2026-08-19T10:00:00Z',
-    notes: 'Sample master reference invoice for vehicle locating'
-  },
-  {
-    id: 'inv-seed-2',
-    invoiceNumber: 'AR26-0905',
-    invoiceDate: 'September 5, 2026',
-    dueDate: 'Net 15 days',
-    vendorId: 'vendor-1',
-    vendor: {
-      companyName: 'WINDSOR MITSUBISHI LTD',
-      address: '1622 Sylvestre Dr, Tecumseh, ON N9K 0B9',
-      phone: '(519) 735-4422',
-      email: 'info@windsormitsubishi.com',
-    },
-    items: [
-      {
-        id: 'item-2-1',
-        title: 'Wholesale Dealer Locating & Acquisition',
-        subDetails: '2023 Honda CR-V Touring — VIN: 849201',
-        quantity: 2,
-        rate: 600.00,
-        amount: 1200.00,
-      },
-      {
-        id: 'item-2-2',
-        title: 'Logistics Coordination & Pre-Delivery Inspection Dispatch',
-        subDetails: '2x Units Windsor to London Regional Hub',
-        quantity: 2,
-        rate: 400.00,
-        amount: 800.00,
-      },
-      {
-        id: 'item-2-3',
-        title: 'Vehicle Sourcing/Locating Service Fee',
-        subDetails: '2024 Toyota RAV4 Hybrid — VIN: 194823',
-        quantity: 2,
-        rate: 600.00,
-        amount: 1200.00,
-      }
-    ],
-    subtotal: 3200.00,
-    taxType: 'HST',
-    taxRate: 13.0,
-    taxAmount: 416.00,
-    grandTotal: 3616.00,
-    status: 'PAID',
-    paymentDate: '2026-09-12',
-    amountPaid: 3616.00,
-    balanceDue: 0.00,
-    payments: [
-      {
-        id: 'pay-seed-1',
-        amount: 3616.00,
-        date: '2026-09-12',
-        method: 'Bank Transfer',
-        reference: 'EFT-883920-WIN',
-        notes: 'Full payment received via Electronic Funds Transfer',
-        recordedAt: '2026-09-12T14:30:00Z'
-      }
-    ],
-    createdAt: '2026-09-05T09:00:00Z',
-    notes: 'Payment confirmed in full via Direct Deposit EFT.'
-  },
-  {
-    id: 'inv-seed-3',
-    invoiceNumber: 'AR26-0918',
-    invoiceDate: 'September 18, 2026',
-    dueDate: 'Net 30 days',
-    vendorId: 'vendor-2',
-    vendor: {
-      companyName: 'MONTREAL AUTO PRESTIGE INC',
-      address: '4500 Boul Métropolitain E, Saint-Léonard, QC H1S 1K6',
-      phone: '(514) 321-9988',
-      email: 'contact@prestigeautoqc.com',
-    },
-    items: [
-      {
-        id: 'item-3-1',
-        title: 'Fleet Acquisition & Commercial Brokering Services',
-        subDetails: '5x Luxury Sedan Units — Dealer Consignment Lot',
-        quantity: 5,
-        rate: 1200.00,
-        amount: 6000.00,
-      },
-      {
-        id: 'item-3-2',
-        title: 'Specialty Transport & Inter-Provincial Certification',
-        subDetails: 'Quebec Safety Compliance & SAAQ Transit Validation',
-        quantity: 4,
-        rate: 1000.00,
-        amount: 4000.00,
-      }
-    ],
-    subtotal: 10000.00,
-    taxType: 'QUEBEC',
-    taxRate: 14.975,
-    taxAmount: 1497.50,
-    gstAmount: 500.00,
-    qstAmount: 997.50,
-    grandTotal: 11497.50,
-    status: 'PARTIALLY_PAID',
-    paymentDate: '2026-09-24',
-    amountPaid: 6000.00,
-    balanceDue: 5497.50,
-    payments: [
-      {
-        id: 'pay-seed-2',
-        amount: 6000.00,
-        date: '2026-09-24',
-        method: 'Cheque',
-        reference: 'CHQ #4492',
-        notes: 'First installment payment cleared',
-        recordedAt: '2026-09-24T16:00:00Z'
-      }
-    ],
-    createdAt: '2026-09-18T11:20:00Z',
-    notes: 'Quebec dual tax applied: GST 5% ($500.00) + QST 9.975% ($997.50). Partial payment received.'
-  },
-  {
-    id: 'inv-seed-4',
-    invoiceNumber: 'AR26-0928',
-    invoiceDate: 'September 28, 2026',
-    dueDate: 'Net 7 days',
-    vendorId: 'vendor-3',
-    vendor: {
-      companyName: 'TORONTO MOTORS GROUP',
-      address: '777 Dundas St W, Toronto, ON M6J 1V2',
-      phone: '(416) 555-0199',
-      email: 'accounting@torontomotors.ca',
-    },
-    items: [
-      {
-        id: 'item-4-1',
-        title: 'Auction Representation & Bid Execution',
-        subDetails: '2025 Lexus RX 350 AWD — Manheim Toronto Lot #442',
-        quantity: 2,
-        rate: 800.00,
-        amount: 1600.00,
-      }
-    ],
-    subtotal: 1600.00,
-    taxType: 'HST',
-    taxRate: 13.0,
-    taxAmount: 208.00,
-    grandTotal: 1808.00,
-    status: 'OPEN',
-    amountPaid: 0,
-    balanceDue: 1808.00,
-    createdAt: '2026-09-28T15:45:00Z',
-    notes: 'Invoice sent to accounts payable department.'
-  }
-];
+const SEED_INVOICES: Invoice[] = [];
 
 export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
   { id: 'cat-1', name: 'Vehicle Inspection & Certifications', color: '#3B82F6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
@@ -494,12 +281,16 @@ export const storage = {
         q,
         (snapshot) => {
           if (snapshot.empty) {
-            this.seedInitialFirestoreData();
             const local = this.getInvoicesLocal();
             callback(local);
           } else {
             const list: Invoice[] = [];
             snapshot.forEach((docSnap) => {
+              if (docSnap.id.startsWith('inv-seed-')) {
+                // Delete legacy sample seed invoice from Firestore
+                deleteDoc(doc(db, COLLECTIONS.INVOICES, docSnap.id)).catch(() => {});
+                return;
+              }
               const data = docSnap.data();
               if (data) {
                 list.push(normalizeInvoice(data, docSnap.id));
@@ -646,7 +437,11 @@ export const storage = {
         }
       }
 
-      // Clean up any remaining dummy seed expenses from Firestore
+      // Clean up any remaining dummy seed expenses and sample seed invoices from Firestore
+      const dummyInvIds = ['inv-seed-1', 'inv-seed-2', 'inv-seed-3', 'inv-seed-4'];
+      for (const sId of dummyInvIds) {
+        deleteDoc(doc(db, COLLECTIONS.INVOICES, sId)).catch(() => {});
+      }
       const dummyIds = ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'];
       for (const dId of dummyIds) {
         deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
@@ -689,24 +484,28 @@ export const storage = {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.INVOICES);
       if (!data) {
-        const seeded = SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
-        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(seeded));
-        return seeded;
+        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify([]));
+        return [];
       }
       const parsed = JSON.parse(data);
-      if (!Array.isArray(parsed)) return SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
-      const existingIds = new Set(parsed.map((item: any) => item?.id));
-      const merged = [...parsed];
-      for (const seedInv of SEED_INVOICES) {
-        if (!existingIds.has(seedInv.id)) {
-          merged.push(seedInv);
-        }
+      if (!Array.isArray(parsed)) {
+        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify([]));
+        return [];
       }
-      const normalized = merged.map((item) => normalizeInvoice(item, item.id || 'inv_' + Math.random().toString(36).substring(2, 6)));
-      localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(normalized));
-      return normalized;
+      // Thoroughly remove any sample seed invoices (inv-seed-*)
+      const clean = parsed
+        .filter((item: any) => {
+          if (!item) return false;
+          const id = String(item.id || '');
+          if (id.startsWith('inv-seed-')) return false;
+          return true;
+        })
+        .map((item) => normalizeInvoice(item, item.id || 'inv_' + Math.random().toString(36).substring(2, 6)));
+
+      localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(clean));
+      return clean;
     } catch {
-      return SEED_INVOICES.map((inv) => normalizeInvoice(inv, inv.id));
+      return [];
     }
   },
 
@@ -1288,7 +1087,7 @@ export const storage = {
 
   async resetAllData(): Promise<void> {
     localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(SEED_VENDORS));
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(SEED_INVOICES));
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify([]));
     localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
     localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(DEFAULT_EXPENSE_CATEGORIES));
     localStorage.setItem(STORAGE_KEYS.TAX_CONFIG, JSON.stringify(DEFAULT_TAX_CONFIG));
@@ -1297,8 +1096,9 @@ export const storage = {
       for (const v of SEED_VENDORS) {
         await setDoc(doc(db, COLLECTIONS.VENDORS, v.id), cleanForFirestore(v));
       }
-      for (const inv of SEED_INVOICES) {
-        await setDoc(doc(db, COLLECTIONS.INVOICES, inv.id), cleanForFirestore(inv));
+      const dummyInvIds = ['inv-seed-1', 'inv-seed-2', 'inv-seed-3', 'inv-seed-4'];
+      for (const sId of dummyInvIds) {
+        await deleteDoc(doc(db, COLLECTIONS.INVOICES, sId)).catch(() => {});
       }
       const dummyIds = ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'];
       for (const dId of dummyIds) {
@@ -1314,8 +1114,26 @@ export const storage = {
   }
 };
 
-// Immediate cleanup of any legacy dummy expenses from local storage and Firestore
+// Immediate cleanup of any legacy sample seed invoices and dummy expenses from local storage and Firestore
 try {
+  // 1. Clean legacy seed invoices from local storage immediately so there is zero initial flicker
+  const storedInvoices = localStorage.getItem(STORAGE_KEYS.INVOICES);
+  if (storedInvoices) {
+    const parsed = JSON.parse(storedInvoices);
+    if (Array.isArray(parsed)) {
+      const filtered = parsed.filter((inv: any) => {
+        if (!inv) return false;
+        const id = String(inv.id || '');
+        return !id.startsWith('inv-seed-');
+      });
+      localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(filtered));
+    }
+  }
+  ['inv-seed-1', 'inv-seed-2', 'inv-seed-3', 'inv-seed-4'].forEach((sId) => {
+    deleteDoc(doc(db, COLLECTIONS.INVOICES, sId)).catch(() => {});
+  });
+
+  // 2. Clean legacy dummy expenses from local storage and Firestore
   const storedExpenses = localStorage.getItem(STORAGE_KEYS.EXPENSES);
   if (storedExpenses) {
     const parsed = JSON.parse(storedExpenses);

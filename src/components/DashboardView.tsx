@@ -27,7 +27,6 @@ import { Invoice, Vendor, ActiveNavTab, InvoiceAttachment, Expense } from '../ty
 import { formatCurrency, formatDateToDisplay, downloadAttachment, downloadAllAttachments } from '../utils/formatters';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { AttachmentViewerModal } from './AttachmentViewerModal';
-import { InvoiceReportsAccounting } from './InvoiceReportsAccounting';
 import { storage } from '../services/storage';
 
 interface DashboardViewProps {
@@ -143,14 +142,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
           <button
             id="dash-reports-btn"
-            onClick={() => {
-              const el = document.getElementById('invoice-reports-accounting');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 active:bg-indigo-500/40 text-white text-xs font-semibold rounded-lg border border-indigo-400/30 transition cursor-pointer"
+            onClick={() => onNavigate('reports')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 active:bg-emerald-500/40 text-emerald-200 hover:text-white text-xs font-semibold rounded-lg border border-emerald-400/30 transition cursor-pointer"
           >
-            <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
-            <span>Accounting Reports & CSV</span>
+            <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
+            <span>Reports & Accounting</span>
           </button>
           <button
             id="dash-manage-vendors-btn"
@@ -163,199 +159,255 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Metrics Row (Invoices + Expenses + Net Profit) */}
+      {/* Primary Financial Overview Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Total Invoiced */}
-        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-white rounded-xl p-4 sm:p-5 border border-slate-200 shadow-xs flex items-center justify-between min-w-0">
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">
               Total Invoiced
             </p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1 font-mono">
+            <h3
+              className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 font-mono tracking-tight truncate tabular-nums"
+              title={formatCurrency(totalInvoiced)}
+            >
               {formatCurrency(totalInvoiced)}
             </h3>
-            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
-              <FileText className="w-3.5 h-3.5 text-indigo-600" />
-              {invoices.length} invoices generated
+            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium truncate">
+              <FileText className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span>{invoices.length} invoices generated</span>
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-            <DollarSign className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+            <DollarSign className="w-5 h-5" />
           </div>
         </div>
 
         {/* Open / Unpaid */}
         <div
           onClick={() => onNavigate('open-invoices')}
-          className="bg-white rounded-xl p-5 border border-amber-200 bg-amber-50/20 shadow-sm flex items-center justify-between cursor-pointer hover:border-amber-300 transition"
+          className="bg-white rounded-xl p-4 sm:p-5 border border-amber-200 bg-amber-50/20 shadow-xs flex items-center justify-between cursor-pointer hover:border-amber-300 transition min-w-0"
         >
-          <div>
-            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1">
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1 truncate">
               <span>Open / Unpaid</span>
-              <ArrowUpRight className="w-3 h-3" />
+              <ArrowUpRight className="w-3 h-3 shrink-0" />
             </p>
-            <h3 className="text-2xl font-bold text-amber-900 mt-1 font-mono">
+            <h3
+              className="text-xl sm:text-2xl font-bold text-amber-900 mt-1 font-mono tracking-tight truncate tabular-nums"
+              title={formatCurrency(openBalance)}
+            >
               {formatCurrency(openBalance)}
             </h3>
-            <p className="text-[11px] text-amber-700 mt-1 font-semibold">
+            <p className="text-[11px] text-amber-700 mt-1 font-semibold truncate">
               {openInvoices.length} awaiting payment
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
-            <Clock className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5" />
           </div>
         </div>
 
         {/* Paid / Completed */}
         <div
           onClick={() => onNavigate('paid-invoices')}
-          className="bg-white rounded-xl p-5 border border-emerald-200 bg-emerald-50/20 shadow-sm flex items-center justify-between cursor-pointer hover:border-emerald-300 transition"
+          className="bg-white rounded-xl p-4 sm:p-5 border border-emerald-200 bg-emerald-50/20 shadow-xs flex items-center justify-between cursor-pointer hover:border-emerald-300 transition min-w-0"
         >
-          <div>
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider flex items-center gap-1 truncate">
               <span>Paid / Collected</span>
-              <ArrowUpRight className="w-3 h-3" />
+              <ArrowUpRight className="w-3 h-3 shrink-0" />
             </p>
-            <h3 className="text-2xl font-bold text-emerald-900 mt-1 font-mono">
+            <h3
+              className="text-xl sm:text-2xl font-bold text-emerald-900 mt-1 font-mono tracking-tight truncate tabular-nums"
+              title={formatCurrency(paidBalance)}
+            >
               {formatCurrency(paidBalance)}
             </h3>
-            <p className="text-[11px] text-emerald-700 mt-1 font-semibold">
+            <p className="text-[11px] text-emerald-700 mt-1 font-semibold truncate">
               {paidInvoices.length} completed
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-            <CheckCircle2 className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-5 h-5" />
           </div>
         </div>
 
         {/* Total Business Expenses */}
         <div
           onClick={() => onNavigate('expenses')}
-          className="bg-white rounded-xl p-5 border border-rose-200 bg-rose-50/20 shadow-sm flex items-center justify-between cursor-pointer hover:border-rose-300 transition"
+          className="bg-white rounded-xl p-4 sm:p-5 border border-rose-200 bg-rose-50/20 shadow-xs flex items-center justify-between cursor-pointer hover:border-rose-300 transition min-w-0"
         >
-          <div>
-            <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider flex items-center gap-1">
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider flex items-center gap-1 truncate">
               <span>Total Outlays</span>
-              <ArrowUpRight className="w-3 h-3" />
+              <ArrowUpRight className="w-3 h-3 shrink-0" />
             </p>
-            <h3 className="text-2xl font-bold text-rose-900 mt-1 font-mono">
+            <h3
+              className="text-xl sm:text-2xl font-bold text-rose-900 mt-1 font-mono tracking-tight truncate tabular-nums"
+              title={formatCurrency(totalExpenses)}
+            >
               {formatCurrency(totalExpenses)}
             </h3>
-            <p className="text-[11px] text-rose-700 mt-1 font-semibold">
+            <p className="text-[11px] text-rose-700 mt-1 font-semibold truncate">
               {safeExpenses.length} non-invoiced costs
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
-            <TrendingDown className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+            <TrendingDown className="w-5 h-5" />
           </div>
         </div>
 
         {/* Net Operating Profit */}
-        <div className={`bg-white rounded-xl p-5 border shadow-sm flex items-center justify-between ${
-          netOperatingIncome >= 0 ? 'border-emerald-200 bg-emerald-50/30' : 'border-rose-200 bg-rose-50/30'
-        }`}>
-          <div>
-            <p className={`text-xs font-semibold uppercase tracking-wider ${
-              netOperatingIncome >= 0 ? 'text-emerald-800' : 'text-rose-800'
-            }`}>
+        <div
+          className={`bg-white rounded-xl p-4 sm:p-5 border shadow-xs flex items-center justify-between min-w-0 ${
+            netOperatingIncome >= 0 ? 'border-emerald-200 bg-emerald-50/30' : 'border-rose-200 bg-rose-50/30'
+          }`}
+        >
+          <div className="min-w-0 flex-1 pr-2">
+            <p
+              className={`text-xs font-semibold uppercase tracking-wider truncate ${
+                netOperatingIncome >= 0 ? 'text-emerald-800' : 'text-rose-800'
+              }`}
+            >
               Net Operating Profit
             </p>
-            <h3 className={`text-2xl font-bold mt-1 font-mono ${
-              netOperatingIncome >= 0 ? 'text-emerald-950' : 'text-rose-950'
-            }`}>
+            <h3
+              className={`text-xl sm:text-2xl font-bold mt-1 font-mono tracking-tight truncate tabular-nums ${
+                netOperatingIncome >= 0 ? 'text-emerald-950' : 'text-rose-950'
+              }`}
+              title={formatCurrency(netOperatingIncome)}
+            >
               {formatCurrency(netOperatingIncome)}
             </h3>
-            <p className="text-[11px] text-slate-500 mt-1 font-medium">
-              Revenue - Outlays
+            <p className="text-[11px] text-slate-500 mt-1 font-medium truncate">
+              Revenue − Outlays
             </p>
           </div>
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-            netOperatingIncome >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-          }`}>
-            <TrendingUp className="w-6 h-6" />
+          <div
+            className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+              netOperatingIncome >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+            }`}
+          >
+            <TrendingUp className="w-5 h-5" />
           </div>
         </div>
       </div>
 
-      {/* Tax Accounting Cards (Tax Collected & Tax Paid) */}
+      {/* Tax Accounting Summary (Tax Collected, Tax Paid, Net Tax Remittance) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Tax Collected Card */}
-        <div className="bg-white rounded-xl p-5 border border-indigo-200 bg-indigo-50/20 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
-              <Landmark className="w-3.5 h-3.5 text-indigo-600" />
+        <div className="bg-white rounded-xl p-4 sm:p-5 border border-indigo-200 bg-indigo-50/20 shadow-xs flex items-center justify-between min-w-0">
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5 truncate">
+              <Landmark className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <span>Tax Collected (Invoices)</span>
             </p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1 font-mono">
+            <h3
+              className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 font-mono tracking-tight truncate tabular-nums"
+              title={formatCurrency(totalTaxCollected)}
+            >
               {formatCurrency(totalTaxCollected)}
             </h3>
-            <p className="text-[11px] text-slate-500 mt-1 font-medium">
-              HST/GST/QST on invoices ({formatCurrency(taxCollectedRealized)} collected)
+            <p className="text-[11px] text-slate-500 mt-1 font-medium truncate">
+              HST/GST/QST on invoices ({formatCurrency(taxCollectedRealized)} realized)
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
-            <Percent className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+            <Percent className="w-5 h-5" />
           </div>
         </div>
 
         {/* Tax Paid Card */}
         <div
           onClick={() => onNavigate('expenses')}
-          className="bg-white rounded-xl p-5 border border-amber-200 bg-amber-50/20 shadow-sm flex items-center justify-between cursor-pointer hover:border-amber-300 transition"
+          className="bg-white rounded-xl p-4 sm:p-5 border border-amber-200 bg-amber-50/20 shadow-xs flex items-center justify-between cursor-pointer hover:border-amber-300 transition min-w-0"
         >
-          <div>
-            <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-              <Receipt className="w-3.5 h-3.5 text-amber-600" />
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1.5 truncate">
+              <Receipt className="w-3.5 h-3.5 text-amber-600 shrink-0" />
               <span>Tax Paid (Expenses)</span>
-              <ArrowUpRight className="w-3 h-3 text-amber-600" />
+              <ArrowUpRight className="w-3 h-3 text-amber-600 shrink-0" />
             </p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1 font-mono">
+            <h3
+              className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 font-mono tracking-tight truncate tabular-nums"
+              title={formatCurrency(totalTaxPaid)}
+            >
               {formatCurrency(totalTaxPaid)}
             </h3>
-            <p className="text-[11px] text-slate-500 mt-1 font-medium">
-              Input tax credits paid on business outlays ({expensesWithTaxCount} items)
+            <p className="text-[11px] text-slate-500 mt-1 font-medium truncate">
+              Input tax credits paid ({expensesWithTaxCount} items)
             </p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
-            <TrendingDown className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+            <TrendingDown className="w-5 h-5" />
           </div>
         </div>
 
         {/* Net Tax Remittance Card */}
-        <div className={`bg-white rounded-xl p-5 border shadow-sm flex items-center justify-between sm:col-span-2 lg:col-span-1 ${
-          netTaxRemittance >= 0 ? 'border-slate-200 bg-slate-50/40' : 'border-blue-200 bg-blue-50/20'
-        }`}>
-          <div>
-            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <Scale className="w-3.5 h-3.5 text-slate-600" />
+        <div
+          className={`bg-white rounded-xl p-4 sm:p-5 border shadow-xs flex items-center justify-between sm:col-span-2 lg:col-span-1 min-w-0 ${
+            netTaxRemittance >= 0 ? 'border-slate-200 bg-slate-50/40' : 'border-blue-200 bg-blue-50/20'
+          }`}
+        >
+          <div className="min-w-0 flex-1 pr-2">
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 truncate">
+              <Scale className="w-3.5 h-3.5 text-slate-600 shrink-0" />
               <span>Net Tax Remittance</span>
             </p>
-            <h3 className={`text-2xl font-bold mt-1 font-mono ${
-              netTaxRemittance >= 0 ? 'text-slate-900' : 'text-blue-900'
-            }`}>
+            <h3
+              className={`text-xl sm:text-2xl font-bold mt-1 font-mono tracking-tight truncate tabular-nums ${
+                netTaxRemittance >= 0 ? 'text-slate-900' : 'text-blue-900'
+              }`}
+              title={formatCurrency(netTaxRemittance)}
+            >
               {formatCurrency(netTaxRemittance)}
             </h3>
-            <p className="text-[11px] text-slate-500 mt-1 font-medium">
+            <p className="text-[11px] text-slate-500 mt-1 font-medium truncate">
               {netTaxRemittance >= 0
-                ? 'Tax Collected − Tax Paid (Payable to Government)'
-                : 'Tax Paid > Tax Collected (Tax Refund Due)'}
+                ? 'Tax Collected − Paid (Payable to Revenue Agency)'
+                : 'Tax Paid > Collected (Refund Due from Govt)'}
             </p>
           </div>
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-            netTaxRemittance >= 0 ? 'bg-slate-200/80 text-slate-700' : 'bg-blue-100 text-blue-700'
-          }`}>
-            <Scale className="w-6 h-6" />
+          <div
+            className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+              netTaxRemittance >= 0 ? 'bg-slate-200/80 text-slate-700' : 'bg-blue-100 text-blue-700'
+            }`}
+          >
+            <Scale className="w-5 h-5" />
           </div>
         </div>
       </div>
 
-      {/* Invoice Reports & Accounting Module */}
-      <InvoiceReportsAccounting
-        invoices={safeInvoices}
-        vendors={safeVendors}
-        onViewInvoice={onViewInvoice}
-        onShowToast={onShowToast || ((msg) => console.log(msg))}
-      />
+      {/* Reports & Accounting Module Hub Card */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 sm:p-6 text-white border border-indigo-900/50 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <FileSpreadsheet className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Accounting Module</span>
+              <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded-full font-mono">CA & Audit Ready</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-bold text-white mt-0.5">Invoice Reports, Accounting & CSV Export</h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Select custom date ranges, review detailed tax calculations, analyze customer performance, and export accountant-friendly CSV files.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            id="dash-open-reports-full-btn"
+            onClick={() => onNavigate('reports')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow transition cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Open Reports & Accounting</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
 
       {/* Recent Invoices Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -384,22 +436,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+          <div className="overflow-x-auto table-scroll-container">
+            <table className="w-full text-left text-xs border-collapse min-w-[700px]">
               <thead>
                 <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
-                  <th className="py-3 px-5">Invoice #</th>
-                  <th className="py-3 px-5">Vendor / Billed To</th>
-                  <th className="py-3 px-5">Date</th>
-                  <th className="py-3 px-5 text-right">Tax</th>
-                  <th className="py-3 px-5 text-right">Total Amount</th>
-                  <th className="py-3 px-5 text-center">Status</th>
-                  <th className="py-3 px-5 text-right">Actions</th>
+                  <th className="py-3 px-5 whitespace-nowrap">Invoice #</th>
+                  <th className="py-3 px-5 whitespace-nowrap">Vendor / Billed To</th>
+                  <th className="py-3 px-5 whitespace-nowrap">Date</th>
+                  <th className="py-3 px-5 text-right whitespace-nowrap">Tax</th>
+                  <th className="py-3 px-5 text-right whitespace-nowrap">Total Amount</th>
+                  <th className="py-3 px-5 text-center whitespace-nowrap">Status</th>
+                  <th className="py-3 px-5 text-right whitespace-nowrap">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {recentInvoices.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50/80 transition">
+                  <tr key={inv.id} className="group hover:bg-slate-50/80 transition">
                     <td className="py-3 px-5 font-bold text-slate-900 font-mono">
                       <div className="flex items-center gap-1.5">
                         <button
@@ -565,7 +619,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-5 text-right">
+                    <td className="py-3 px-5 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
                         {inv.status === 'OPEN' && (
                           <button

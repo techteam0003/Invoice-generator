@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Files,
   Search,
@@ -18,7 +18,11 @@ import {
   Paperclip,
   CreditCard,
   FileText,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { Invoice, Vendor, InvoiceAttachment } from '../types';
 import { formatCurrency, formatDateToDisplay, downloadAttachment, downloadAllAttachments } from '../utils/formatters';
@@ -44,6 +48,30 @@ interface InvoiceListViewProps {
   onRemoveAttachment?: (invoiceId: string, attachmentId: string) => void;
 }
 
+interface SavedFilterState {
+  searchQuery?: string;
+  selectedVendorFilter?: string;
+  statusFilter?: 'ALL' | 'OPEN' | 'PARTIALLY_PAID' | 'PAID';
+  sortBy?: 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
+  startDate?: string;
+  endDate?: string;
+  activeDateQuick?: 'all' | 'this-month' | 'last-month' | 'this-quarter' | 'this-year' | 'custom';
+  currentPage?: number;
+  pageSize?: number;
+}
+
+const getSavedFilters = (preset: string): SavedFilterState => {
+  try {
+    const raw = sessionStorage.getItem(`invoice_filters_${preset}`);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    // ignore parse or storage errors
+  }
+  return {};
+};
+
 export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
   invoices,
   vendors,
@@ -61,12 +89,89 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
   onAddAttachments,
   onRemoveAttachment,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedVendorFilter, setSelectedVendorFilter] = useState('');
+  // Load saved filter state so returning after editing/updating keeps all filters intact
+  const savedFilters = useMemo(() => getSavedFilters(statusFilterPreset), [statusFilterPreset]);
+
+  const [searchQuery, setSearchQuery] = useState(() => savedFilters.searchQuery || '');
+  const [selectedVendorFilter, setSelectedVendorFilter] = useState(() => savedFilters.selectedVendorFilter || '');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PARTIALLY_PAID' | 'PAID'>(
-    statusFilterPreset === 'ALL' ? 'ALL' : statusFilterPreset
+    () => savedFilters.statusFilter || (statusFilterPreset === 'ALL' ? 'ALL' : statusFilterPreset)
   );
-  const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
+  const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>(
+    () => savedFilters.sortBy || 'date-desc'
+  );
+
+  // Date Range Filter State
+  const [startDate, setStartDate] = useState(() => savedFilters.startDate || '');
+  const [endDate, setEndDate] = useState(() => savedFilters.endDate || '');
+  const [activeDateQuick, setActiveDateQuick] = useState<
+    'all' | 'this-month' | 'last-month' | 'this-quarter' | 'this-year' | 'custom'
+  >(() => savedFilters.activeDateQuick || 'all');
+
+  const handleSelectQuickDate = (preset: 'all' | 'this-month' | 'last-month' | 'this-quarter' | 'this-year') => {
+    setActiveDateQuick(preset);
+    if (preset === 'all') {
+      setStartDate('');
+      setEndDate('');
+      return;
+    }
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const pad = (n: number) => String(n).padStart(2, '0');
+
+    if (preset === 'this-month') {
+      const start = `${y}-${pad(m + 1)}-01`;
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      const end = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+      setStartDate(start);
+      setEndDate(end);
+    } else if (preset === 'last-month') {
+      const prevM = m === 0 ? 11 : m - 1;
+      const prevY = m === 0 ? y - 1 : y;
+      const start = `${prevY}-${pad(prevM + 1)}-01`;
+      const lastDay = new Date(prevY, prevM + 1, 0).getDate();
+      const end = `${prevY}-${pad(prevM + 1)}-${pad(lastDay)}`;
+      setStartDate(start);
+      setEndDate(end);
+    } else if (preset === 'this-quarter') {
+      const q = Math.floor(m / 3);
+      const start = `${y}-${pad(q * 3 + 1)}-01`;
+      const lastDay = new Date(y, (q + 1) * 3, 0).getDate();
+      const end = `${y}-${pad((q + 1) * 3)}-${pad(lastDay)}`;
+      setStartDate(start);
+      setEndDate(end);
+    } else if (preset === 'this-year') {
+      setStartDate(`${y}-01-01`);
+      setEndDate(`${y}-12-31`);
+    }
+  };
+
+  const handleClearDateRange = () => {
+    setActiveDateQuick('all');
+    setStartDate('');
+    setEndDate('');
+  };
+
+  // Helper date parser
+  const parseDateToYMD = (dateStr?: string): string => {
+    if (!dateStr) return '';
+    const trimmed = dateStr.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    if (trimmed.includes('T')) {
+      return trimmed.split('T')[0];
+    }
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return '';
+  };
 
   // Attachment interactive modal & popover state
   const [attachmentModalInvoice, setAttachmentModalInvoice] = useState<Invoice | null>(null);
@@ -106,6 +211,15 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
         return false;
       }
 
+      // Date Range Filter
+      if (startDate || endDate) {
+        const invYMD = parseDateToYMD(inv.invoiceDate) || parseDateToYMD(inv.createdAt);
+        if (invYMD) {
+          if (startDate && invYMD < startDate) return false;
+          if (endDate && invYMD > endDate) return false;
+        }
+      }
+
       // Search query (invoice number, vendor name, vin, descriptions)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -131,13 +245,103 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
       // date-desc default
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
-  }, [invoices, statusFilterPreset, statusFilter, selectedVendorFilter, searchQuery, sortBy]);
+  }, [invoices, statusFilterPreset, statusFilter, selectedVendorFilter, searchQuery, sortBy, startDate, endDate]);
 
   const handleConfirmPayment = () => {
     if (payingInvoice) {
       onMarkAsPaid(payingInvoice.id, paymentDateInput);
       setPayingInvoice(null);
     }
+  };
+
+  // Pagination State - defaults to 10 listings per page as requested, restoring saved page if available
+  const [currentPage, setCurrentPage] = useState<number>(() => {
+    return typeof savedFilters.currentPage === 'number' && savedFilters.currentPage > 0
+      ? savedFilters.currentPage
+      : 1;
+  });
+  const [pageSize, setPageSize] = useState<number>(() => {
+    return typeof savedFilters.pageSize === 'number' && savedFilters.pageSize > 0
+      ? savedFilters.pageSize
+      : 10;
+  });
+
+  // Track initial mount so we don't reset currentPage on first load when returning
+  const isFirstMountRef = useRef(true);
+
+  // Reset pagination to page 1 ONLY when any filter or search is modified after mount
+  useEffect(() => {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      return;
+    }
+    setCurrentPage(1);
+  }, [searchQuery, selectedVendorFilter, statusFilter, statusFilterPreset, sortBy, startDate, endDate]);
+
+  // Persist all filters and pagination to sessionStorage whenever they change
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        `invoice_filters_${statusFilterPreset}`,
+        JSON.stringify({
+          searchQuery,
+          selectedVendorFilter,
+          statusFilter,
+          sortBy,
+          startDate,
+          endDate,
+          activeDateQuick,
+          currentPage,
+          pageSize,
+        })
+      );
+    } catch (e) {
+      // ignore
+    }
+  }, [
+    statusFilterPreset,
+    searchQuery,
+    selectedVendorFilter,
+    statusFilter,
+    sortBy,
+    startDate,
+    endDate,
+    activeDateQuick,
+    currentPage,
+    pageSize,
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
+
+  // Ensure current page does not exceed total pages when dataset shrinks
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedInvoices = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredInvoices.slice(startIndex, startIndex + pageSize);
+  }, [filteredInvoices, currentPage, pageSize]);
+
+  const startRecord = filteredInvoices.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endRecord = Math.min(filteredInvoices.length, currentPage * pageSize);
+
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      if (currentPage <= 4) {
+        pages.push(1, 2, 3, 4, 5, '...', totalPages);
+      } else if (currentPage >= totalPages - 3) {
+        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+      }
+    }
+    return pages;
   };
 
   return (
@@ -223,20 +427,116 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
           </div>
         </div>
 
+        {/* Date Range Filter Row */}
+        <div className="pt-2.5 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-slate-600 flex items-center gap-1 mr-1">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Date Range:</span>
+            </span>
+            {(
+              [
+                { id: 'all', label: 'All Time' },
+                { id: 'this-month', label: 'This Month' },
+                { id: 'last-month', label: 'Last Month' },
+                { id: 'this-quarter', label: 'This Quarter' },
+                { id: 'this-year', label: 'This Year' }
+              ] as const
+            ).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => handleSelectQuickDate(preset.id)}
+                className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition cursor-pointer ${
+                  activeDateQuick === preset.id
+                    ? 'bg-indigo-600 text-white shadow-2xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs">
+              <label htmlFor="inv-start-date" className="text-[11px] font-medium text-slate-400">
+                From:
+              </label>
+              <input
+                id="inv-start-date"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setActiveDateQuick('custom');
+                }}
+                className="bg-transparent text-slate-800 text-xs font-mono focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs">
+              <label htmlFor="inv-end-date" className="text-[11px] font-medium text-slate-400">
+                To:
+              </label>
+              <input
+                id="inv-end-date"
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setActiveDateQuick('custom');
+                }}
+                className="bg-transparent text-slate-800 text-xs font-mono focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            {(startDate || endDate) && (
+              <button
+                type="button"
+                onClick={handleClearDateRange}
+                className="px-2 py-1 text-[11px] font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-md transition cursor-pointer"
+              >
+                Reset Date
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
-          <span>
-            Showing <strong className="text-slate-800">{filteredInvoices.length}</strong> invoice(s)
-          </span>
-          {(searchQuery || selectedVendorFilter || (statusFilterPreset === 'ALL' && statusFilter !== 'ALL')) && (
+          <div className="flex items-center gap-2">
+            <span>
+              Showing <strong className="text-slate-800">{filteredInvoices.length > 0 ? `${startRecord}–${endRecord}` : 0}</strong> of{' '}
+              <strong className="text-slate-800">{filteredInvoices.length}</strong> invoice(s)
+              {filteredInvoices.length !== invoices.length && (
+                <span className="text-slate-400 ml-1">({invoices.length} total in system)</span>
+              )}
+            </span>
+            {(startDate || endDate) && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                <Calendar className="w-3 h-3" />
+                {startDate || 'Earliest'} to {endDate || 'Latest'}
+              </span>
+            )}
+          </div>
+          {(searchQuery || selectedVendorFilter || (statusFilterPreset === 'ALL' && statusFilter !== 'ALL') || startDate || endDate) && (
             <button
               onClick={() => {
                 setSearchQuery('');
                 setSelectedVendorFilter('');
-                setStatusFilter('ALL');
+                setStatusFilter(statusFilterPreset === 'ALL' ? 'ALL' : (statusFilterPreset as any));
+                setSortBy('date-desc');
+                handleClearDateRange();
+                setCurrentPage(1);
+                try {
+                  sessionStorage.removeItem(`invoice_filters_${statusFilterPreset}`);
+                } catch (e) {
+                  // ignore
+                }
               }}
               className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
             >
-              Clear filters
+              Clear all filters
             </button>
           )}
         </div>
@@ -255,23 +555,25 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
-                  <th className="py-3 px-4">Invoice #</th>
-                  <th className="py-3 px-4">Vendor Name</th>
-                  <th className="py-3 px-4">Invoice Date</th>
-                  <th className="py-3 px-4 text-right">Tax (HST/GST)</th>
-                  <th className="py-3 px-4 text-right">Total Amount</th>
-                  <th className="py-3 px-4 text-center">Status</th>
-                  <th className="py-3 px-4 text-center">Payment Date</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+          <div className="table-scroll-container overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto">
+            <table className="w-full text-left text-xs border-collapse min-w-[780px]">
+              <thead className="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 shadow-2xs">
+                <tr className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-4 whitespace-nowrap">Invoice #</th>
+                  <th className="py-3 px-4 whitespace-nowrap min-w-[180px]">Vendor Name</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Invoice Date</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Tax (HST/GST)</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Amount</th>
+                  <th className="py-3 px-4 text-center whitespace-nowrap">Status</th>
+                  <th className="py-3 px-4 text-center whitespace-nowrap">Payment Date</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInvoices.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50/80 transition">
+                {paginatedInvoices.map((inv) => (
+                  <tr key={inv.id} className="group hover:bg-slate-50/80 transition">
                     {/* Invoice Number */}
                     <td className="py-3.5 px-4 font-bold font-mono text-slate-900">
                       <div className="flex items-center gap-2">
@@ -409,17 +711,17 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                     </td>
 
                     {/* Invoice Date */}
-                    <td className="py-3.5 px-4 text-slate-600 font-medium">
+                    <td className="py-3.5 px-4 text-slate-600 font-medium whitespace-nowrap">
                       {formatDateToDisplay(inv.invoiceDate)}
                     </td>
 
                     {/* Tax Amount */}
-                    <td className="py-3.5 px-4 text-right font-mono text-slate-600">
+                    <td className="py-3.5 px-4 text-right font-mono text-slate-600 whitespace-nowrap">
                       {formatCurrency(inv.taxAmount)}
                     </td>
 
                     {/* Total Amount & Balance */}
-                    <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-950">
+                    <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-950 whitespace-nowrap">
                       <div>{formatCurrency(inv.grandTotal)}</div>
                       {inv.status === 'PARTIALLY_PAID' && (
                         <div className="text-[10px] text-amber-600 font-normal">
@@ -429,7 +731,7 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                     </td>
 
                     {/* Status */}
-                    <td className="py-3.5 px-4 text-center">
+                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
                       {inv.status === 'PAID' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                           <CheckCircle2 className="w-3 h-3" />
@@ -452,7 +754,7 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                     </td>
 
                     {/* Payment Date */}
-                    <td className="py-3.5 px-4 text-center text-slate-600 text-[11px]">
+                    <td className="py-3.5 px-4 text-center text-slate-600 text-[11px] whitespace-nowrap">
                       {inv.status === 'PAID' && inv.paymentDate ? (
                         <span className="font-semibold text-emerald-800">
                           {formatDateToDisplay(inv.paymentDate)}
@@ -467,7 +769,7 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                     </td>
 
                     {/* Actions */}
-                    <td className="py-3.5 px-4 text-right">
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1">
                         {inv.status !== 'PAID' ? (
                           <button
@@ -544,6 +846,102 @@ export const InvoiceListView: React.FC<InvoiceListViewProps> = ({
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Controls Footer */}
+        {filteredInvoices.length > 0 && (
+          <div className="px-4 py-3 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3 text-slate-600">
+              <span>
+                Showing <strong className="font-bold text-slate-900">{startRecord}</strong> to{' '}
+                <strong className="font-bold text-slate-900">{endRecord}</strong> of{' '}
+                <strong className="font-bold text-slate-900">{filteredInvoices.length}</strong> listings
+              </span>
+              <div className="flex items-center gap-1.5 pl-3 border-l border-slate-200">
+                <span className="text-slate-500 text-[11px]">Rows:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="px-2 py-0.5 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-700 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={30}>30</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1 self-center sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  title="First page"
+                  className="p-1 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  title="Previous page"
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+
+                <div className="flex items-center gap-1 mx-1">
+                  {getPageNumbers().map((p, idx) =>
+                    p === '...' ? (
+                      <span key={`ellipsis-${idx}`} className="px-1 text-slate-400 select-none">
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={`page-${p}`}
+                        type="button"
+                        onClick={() => setCurrentPage(p as number)}
+                        className={`min-w-[28px] h-7 px-2 text-xs font-bold rounded-md transition cursor-pointer ${
+                          currentPage === p
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-slate-700 hover:bg-slate-100 border border-transparent'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  title="Next page"
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  title="Last page"
+                  className="p-1 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                >
+                  <ChevronsRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

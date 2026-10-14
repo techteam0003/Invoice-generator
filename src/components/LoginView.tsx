@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, User, ShieldCheck, AlertCircle, ArrowRight, FileSpreadsheet, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, AlertCircle, ArrowRight, FileSpreadsheet, Eye, EyeOff } from 'lucide-react';
 
 interface LoginViewProps {
   onLoginSuccess: (username: string) => void;
@@ -12,30 +12,34 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Authorized credentials
+  const VALID_CREDENTIALS: Record<string, string> = {
+    BK: '4737',
+    markib: '424737',
+    anaya: '891210'
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
     setTimeout(() => {
-      // Strictly validate exact case and credentials: BK / 4737
-      if (username === 'BK' && password === '4737') {
-        onLoginSuccess(username);
+      const trimmedUser = username.trim();
+      const trimmedPass = password.trim();
+
+      // Case-insensitive user lookup while preserving exact user key
+      const matchedKey = Object.keys(VALID_CREDENTIALS).find(
+        (key) => key.toLowerCase() === trimmedUser.toLowerCase()
+      );
+
+      if (matchedKey && VALID_CREDENTIALS[matchedKey] === trimmedPass) {
+        onLoginSuccess(matchedKey);
       } else {
-        if (username.toLowerCase() === 'bk' && username !== 'BK') {
-          setError('Username is case-sensitive. Please enter exact uppercase "BK".');
-        } else {
-          setError('Invalid username or password. Please verify your credentials.');
-        }
+        setError('Invalid username or password. Please verify your credentials.');
         setIsLoading(false);
       }
     }, 350);
-  };
-
-  const handleFillDemo = () => {
-    setUsername('BK');
-    setPassword('4737');
-    setError(null);
   };
 
   return (
@@ -94,13 +98,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter username (e.g. BK)"
+                  placeholder="Enter your username"
                   className="block w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-medium"
                 />
               </div>
-              <span className="text-[11px] text-slate-400 mt-1 block">
-                Case-sensitive (strictly uppercase)
-              </span>
             </div>
 
             <div>
@@ -153,21 +154,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             </button>
           </form>
 
-          {/* Demo helper */}
-          <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span className="flex items-center gap-1.5 font-medium text-slate-600">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              BK Authentication
-            </span>
-            <button
-              type="button"
-              id="autofill-credentials-btn"
-              onClick={handleFillDemo}
-              className="text-indigo-600 hover:text-indigo-800 font-semibold hover:underline cursor-pointer"
-            >
-              Auto-fill credentials
-            </button>
-          </div>
         </div>
 
         {/* Footer info */}

@@ -9,6 +9,7 @@ import { CreateInvoiceView } from './components/CreateInvoiceView';
 import { InvoiceListView } from './components/InvoiceListView';
 import { ExpenseManagerView } from './components/ExpenseManagerView';
 import { SettingsView } from './components/SettingsView';
+import { InvoiceReportsAccounting } from './components/InvoiceReportsAccounting';
 import { InvoicePreviewModal } from './components/InvoicePreviewModal';
 import { downloadInvoicePDF } from './utils/pdfGenerator';
 import {
@@ -44,6 +45,7 @@ export default function App() {
   // 4. Modal & Preview States
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [tabBeforeEdit, setTabBeforeEdit] = useState<string>('all-invoices');
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [selectedVendorForInvoice, setSelectedVendorForInvoice] = useState<Vendor | null>(null);
   const [globalToast, setGlobalToast] = useState<{ message: string; type?: 'success' | 'info' } | null>(null);
@@ -165,6 +167,7 @@ export default function App() {
   };
 
   const handleStartEditInvoice = (invoice: Invoice) => {
+    setTabBeforeEdit(activeTab);
     setEditingInvoice(invoice);
     setSelectedVendorForInvoice(null);
     setActiveTab('create-invoice');
@@ -172,7 +175,7 @@ export default function App() {
 
   const handleCancelEditInvoice = () => {
     setEditingInvoice(null);
-    setActiveTab('all-invoices');
+    setActiveTab(tabBeforeEdit || 'all-invoices');
   };
 
   const handleUpdateInvoice = (invoiceId: string, updates: Partial<Invoice>): Invoice | null => {
@@ -188,7 +191,7 @@ export default function App() {
   const handleInvoiceUpdated = (invoice: Invoice) => {
     setEditingInvoice(null);
     setPreviewInvoice(invoice);
-    setActiveTab('all-invoices');
+    setActiveTab(tabBeforeEdit || 'all-invoices');
   };
 
   const handleSaveTaxConfig = (config: TaxConfig) => {
@@ -418,8 +421,8 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-2 pl-3 border-l border-slate-200 text-xs text-slate-600 font-medium">
-              <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs border border-indigo-200">
-                {auth.username}
+              <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs border border-indigo-200 uppercase shrink-0">
+                {auth.username ? auth.username.slice(0, 2).toUpperCase() : 'BK'}
               </span>
               <span className="hidden sm:inline font-semibold text-slate-800">{auth.username}</span>
             </div>
@@ -562,6 +565,15 @@ export default function App() {
                 onDeleteExpense={handleDeleteExpense}
                 onAddCategory={handleAddCategory}
                 onDeleteCategory={handleDeleteCategory}
+              />
+            )}
+
+            {activeTab === 'reports' && (
+              <InvoiceReportsAccounting
+                invoices={invoices}
+                vendors={vendors}
+                onViewInvoice={(inv) => setPreviewInvoice(inv)}
+                onShowToast={showToast}
               />
             )}
 
