@@ -1,0 +1,1280 @@
+import {
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  Unsubscribe
+} from 'firebase/firestore';
+import { db } from './firebase';
+import {
+  Invoice,
+  Vendor,
+  TaxConfig,
+  PaymentRecord,
+  InvoiceAttachment,
+  InvoiceStatus,
+  Expense,
+  ExpenseCategory,
+  ExpenseAttachment
+} from '../types';
+import { DEFAULT_TAX_CONFIG } from '../constants/companyInfo';
+import { attachmentStore } from './attachmentStore';
+
+const COLLECTIONS = {
+  VENDORS: 'vendors',
+  INVOICES: 'invoices',
+  SETTINGS: 'settings',
+  EXPENSES: 'expenses',
+  EXPENSE_CATEGORIES: 'expense_categories'
+};
+
+const STORAGE_KEYS = {
+  INVOICES: 'bk_invoice_manager_invoices_v1',
+  VENDORS: 'bk_invoice_manager_vendors_v1',
+  TAX_CONFIG: 'bk_invoice_manager_tax_config_v1',
+  AUTH: 'bk_invoice_manager_auth_v1',
+  EXPENSES: 'bk_invoice_manager_expenses_v1',
+  EXPENSE_CATEGORIES: 'bk_invoice_manager_expense_categories_v1'
+};
+
+/**
+ * Safely persists data to localStorage.
+ * If quota is exceeded (common with large base64 attachments),
+ * strips bulky dataUrls while retaining metadata so operations never crash.
+ */
+export function safeLocalStorageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`[storage] LocalStorage quota exceeded on key "${key}", applying safe pruning:`, err);
+    if (key === STORAGE_KEYS.INVOICES) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          const pruned = parsed.map((inv: any) => ({
+            ...inv,
+            attachments: Array.isArray(inv.attachments)
+              ? inv.attachments.map((a: any) => ({
+                  id: a.id,
+                  name: a.name,
+                  size: a.size,
+                  type: a.type,
+                  uploadedAt: a.uploadedAt,
+                  dataUrl: '', // stripped from localStorage; loaded from memory/IndexedDB/Firestore
+                }))
+              : [],
+          }));
+          localStorage.setItem(key, JSON.stringify(pruned));
+          return;
+        }
+      } catch (innerErr) {
+        console.error('[storage] Failed to save pruned invoices to localStorage:', innerErr);
+      }
+    }
+  }
+}
+
+/**
+ * Normalizes an invoice object ensuring all fields like payments, attachments, amountPaid, and balanceDue exist.
+ */
+export function normalizeInvoice(data: any, id: string): Invoice {
+  const items = Array.isArray(data.items)
+    ? data.items.map((it: any) => ({
+        id: it.id || 'item-' + Math.random().toString(36).substring(2, 6),
+        title: it.title || '',
+        subDetails: it.subDetails || undefined,
+        quantity: Number(it.quantity) || 1,
+        rate: Number(it.rate) || 0,
+        amount: Number(it.amount) || 0,
+      }))
+    : [];
+
+  const subtotal = Number(data.subtotal) || 0;
+  const taxRate = Number(data.taxRate) || 13;
+  const taxAmount = Number(data.taxAmount) || 0;
+  const grandTotal = Number(data.grandTotal) || (subtotal + taxAmount);
+
+  const payments: PaymentRecord[] = Array.isArray(data.payments)
+    ? data.payments.map((p: any) => ({
+        id: p.id || 'pmt_' + Math.random().toString(36).substring(2, 6),
+        amount: Number(p.amount) || 0,
+        date: p.date || '',
+        method: p.method || 'Bank Transfer',
+        reference: p.reference || undefined,
+        notes: p.notes || undefined,
+        recordedAt: p.recordedAt || new Date().toISOString(),
+      }))
+    : [];
+
+  const calculatedPaid = payments.reduce((acc: number, p: any) => acc + (p.amount || 0), 0);
+  const amountPaid = data.amountPaid !== undefined && !isNaN(Number(data.amountPaid))
+    ? Number(data.amountPaid)
+    : (payments.length > 0 ? calculatedPaid : (data.status === 'PAID' ? grandTotal : 0));
+  const balanceDue = data.balanceDue !== undefined && !isNaN(Number(data.balanceDue))
+    ? Number(data.balanceDue)
+    : Math.max(0, grandTotal - amountPaid);
+
+  let status: InvoiceStatus = data.status || 'OPEN';
+  if (amountPaid >= grandTotal - 0.001 && grandTotal > 0) {
+    status = 'PAID';
+  } else if (amountPaid > 0) {
+    status = 'PARTIALLY_PAID';
+  } else if (data.status === 'PAID') {
+    status = 'PAID';
+  } else {
+    status = 'OPEN';
+  }
+
+  const attachments: InvoiceAttachment[] = Array.isArray(data.attachments)
+    ? data.attachments.map((att: any) => {
+        const attId = att.id || 'att_' + Math.random().toString(36).substring(2, 6);
+        let dataUrl = att.dataUrl || '';
+        if (dataUrl) {
+          attachmentStore.setMemoryCache(attId, dataUrl);
+          attachmentStore.saveToIndexedDB({
+            id: attId,
+            name: att.name || 'attachment',
+            size: Number(att.size) || 0,
+            type: att.type || 'application/octet-stream',
+            dataUrl,
+            uploadedAt: att.uploadedAt || new Date().toISOString(),
+          }, id).catch(() => {});
+        } else {
+          const cached = attachmentStore.getMemoryCache(attId);
+          if (cached) dataUrl = cached;
+        }
+
+        return {
+          id: attId,
+          name: att.name || 'attachment',
+          size: Number(att.size) || 0,
+          type: att.type || 'application/octet-stream',
+          dataUrl,
+          uploadedAt: att.uploadedAt || new Date().toISOString(),
+        };
+      })
+    : [];
+
+  return {
+    id,
+    invoiceNumber: data.invoiceNumber || 'INV-UNKNOWN',
+    invoiceDate: data.invoiceDate || '',
+    dueDate: data.dueDate || 'Net 7 days',
+    vendorId: data.vendorId || '',
+    vendor: {
+      companyName: data.vendor?.companyName || '',
+      address: data.vendor?.address || '',
+      phone: data.vendor?.phone || undefined,
+      email: data.vendor?.email || undefined,
+    },
+    items,
+    subtotal,
+    taxType: data.taxType || 'HST',
+    taxRate,
+    taxAmount,
+    gstAmount: data.gstAmount !== undefined && data.gstAmount !== null ? Number(data.gstAmount) : undefined,
+    qstAmount: data.qstAmount !== undefined && data.qstAmount !== null ? Number(data.qstAmount) : undefined,
+    grandTotal,
+    status,
+    paymentDate: data.paymentDate || undefined,
+    createdAt: data.createdAt || new Date().toISOString(),
+    notes: data.notes || undefined,
+    payments,
+    amountPaid,
+    balanceDue,
+    attachments,
+  };
+}
+
+/**
+ * Deeply cleans an object so that no `undefined` values are passed to Firestore setDoc/updateDoc
+ */
+export function cleanForFirestore<T>(obj: T): any {
+  if (obj === undefined || obj === null) {
+    return null;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => cleanForFirestore(item));
+  }
+  if (typeof obj === 'object') {
+    const clean: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, any>)) {
+      if (v !== undefined) {
+        clean[k] = cleanForFirestore(v);
+      }
+    }
+    return clean;
+  }
+  return obj;
+}
+
+const SEED_VENDORS: Vendor[] = [
+  {
+    id: 'vendor-1',
+    companyName: 'WINDSOR MITSUBISHI LTD',
+    address: '1622 Sylvestre Dr, Tecumseh, ON N9K 0B9',
+    phone: '(519) 735-4422',
+    email: 'info@windsormitsubishi.com',
+    createdAt: '2026-08-15T10:00:00Z',
+  },
+  {
+    id: 'vendor-2',
+    companyName: 'MONTREAL AUTO PRESTIGE INC',
+    address: '4500 Boul Métropolitain E, Saint-Léonard, QC H1S 1K6',
+    phone: '(514) 321-9988',
+    email: 'contact@prestigeautoqc.com',
+    createdAt: '2026-08-18T14:30:00Z',
+  },
+  {
+    id: 'vendor-3',
+    companyName: 'TORONTO MOTORS GROUP',
+    address: '777 Dundas St W, Toronto, ON M6J 1V2',
+    phone: '(416) 555-0199',
+    email: 'accounting@torontomotors.ca',
+    createdAt: '2026-08-20T09:15:00Z',
+  }
+];
+
+const SEED_INVOICES: Invoice[] = [];
+
+export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  { id: 'cat-1', name: 'Vehicle Inspection & Certifications', color: '#3B82F6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-2', name: 'Towing & Logistics / Transport', color: '#6366F1', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-3', name: 'Fuel & Travel Expenses', color: '#F59E0B', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-4', name: 'Repairs & Detailing', color: '#EC4899', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-5', name: 'Licensing, SAAQ & Registration', color: '#10B981', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-6', name: 'Office, Tools & Administrative', color: '#8B5CF6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-7', name: 'Software & Online Subscriptions', color: '#06B6D4', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-8', name: 'Legal & Professional Accounting', color: '#14B8A6', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-9', name: 'Advertising & Marketing', color: '#F97316', isDefault: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: 'cat-10', name: 'Miscellaneous & Other', color: '#64748B', isDefault: true, createdAt: '2026-08-01T00:00:00Z' }
+];
+
+export const SEED_EXPENSES: Expense[] = [];
+
+export function normalizeExpense(data: any, id: string): Expense {
+  const attachments: ExpenseAttachment[] = Array.isArray(data.attachments)
+    ? data.attachments.map((att: any) => ({
+        id: att.id || 'exp_att_' + Math.random().toString(36).substring(2, 6),
+        name: att.name || 'receipt',
+        size: Number(att.size) || 0,
+        type: att.type || 'application/octet-stream',
+        dataUrl: att.dataUrl || '',
+        uploadedAt: att.uploadedAt || new Date().toISOString(),
+      }))
+    : [];
+
+  return {
+    id,
+    title: data.title || 'Untitled Expense',
+    amount: Number(data.amount) || 0,
+    category: data.category || 'Miscellaneous & Other',
+    categoryId: data.categoryId || undefined,
+    date: data.date || new Date().toISOString().split('T')[0],
+    paymentMethod: data.paymentMethod || 'Credit Card',
+    payee: data.payee || undefined,
+    reference: data.reference || undefined,
+    notes: data.notes || undefined,
+    taxAmount: data.taxAmount !== undefined && data.taxAmount !== null ? Number(data.taxAmount) : undefined,
+    taxDeductible: data.taxDeductible !== undefined ? Boolean(data.taxDeductible) : true,
+    attachments,
+    createdAt: data.createdAt || new Date().toISOString(),
+  };
+}
+
+export const storage = {
+  // Real-time Firestore Subscriptions
+  subscribeVendors(callback: (vendors: Vendor[]) => void): Unsubscribe {
+    try {
+      const q = query(collection(db, COLLECTIONS.VENDORS));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            // Seed initial data to Firestore
+            this.seedInitialFirestoreData();
+            const local = this.getVendorsLocal();
+            callback(local);
+          } else {
+            const list: Vendor[] = [];
+            snapshot.forEach((docSnap) => {
+              const data = docSnap.data() as any;
+              if (data) {
+                list.push({
+                  id: docSnap.id,
+                  companyName: data.companyName || '',
+                  address: data.address || '',
+                  phone: data.phone || undefined,
+                  email: data.email || undefined,
+                  createdAt: data.createdAt || new Date().toISOString(),
+                });
+              }
+            });
+            list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(list));
+            callback(list);
+          }
+        },
+        (error) => {
+          console.warn('Firestore vendor subscription error, using local cache:', error);
+          callback(this.getVendorsLocal());
+        }
+      );
+    } catch (err) {
+      console.warn('Error establishing Firestore vendor listener:', err);
+      callback(this.getVendorsLocal());
+      return () => {};
+    }
+  },
+
+  subscribeInvoices(callback: (invoices: Invoice[]) => void): Unsubscribe {
+    try {
+      const q = query(collection(db, COLLECTIONS.INVOICES));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            const local = this.getInvoicesLocal();
+            callback(local);
+          } else {
+            const list: Invoice[] = [];
+            snapshot.forEach((docSnap) => {
+              if (docSnap.id.startsWith('inv-seed-')) {
+                // Delete legacy sample seed invoice from Firestore
+                deleteDoc(doc(db, COLLECTIONS.INVOICES, docSnap.id)).catch(() => {});
+                return;
+              }
+              const data = docSnap.data();
+              if (data) {
+                list.push(normalizeInvoice(data, docSnap.id));
+              }
+            });
+            list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(list));
+            callback(list);
+          }
+        },
+        (error) => {
+          console.warn('Firestore invoice subscription error, using local cache:', error);
+          callback(this.getInvoicesLocal());
+        }
+      );
+    } catch (err) {
+      console.warn('Error establishing Firestore invoice listener:', err);
+      callback(this.getInvoicesLocal());
+      return () => {};
+    }
+  },
+
+  subscribeTaxConfig(callback: (config: TaxConfig) => void): Unsubscribe {
+    try {
+      const docRef = doc(db, COLLECTIONS.SETTINGS, 'tax_config');
+      return onSnapshot(
+        docRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const cfg = snapshot.data() as TaxConfig;
+            localStorage.setItem(STORAGE_KEYS.TAX_CONFIG, JSON.stringify(cfg));
+            callback(cfg);
+          } else {
+            const local = this.getTaxConfigLocal();
+            setDoc(docRef, cleanForFirestore(local)).catch(() => {});
+            callback(local);
+          }
+        },
+        (error) => {
+          console.warn('Firestore settings subscription error, using local config:', error);
+          callback(this.getTaxConfigLocal());
+        }
+      );
+    } catch (err) {
+      callback(this.getTaxConfigLocal());
+      return () => {};
+    }
+  },
+
+  subscribeExpenses(callback: (expenses: Expense[]) => void): Unsubscribe {
+    try {
+      const q = query(collection(db, COLLECTIONS.EXPENSES));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            const local = this.getExpensesLocal();
+            callback(local);
+          } else {
+            const list: Expense[] = [];
+            snapshot.forEach((docSnap) => {
+              if (docSnap.id.startsWith('exp-seed-')) {
+                // Delete legacy dummy seed expense from Firestore
+                deleteDoc(doc(db, COLLECTIONS.EXPENSES, docSnap.id)).catch(() => {});
+                return;
+              }
+              const data = docSnap.data();
+              if (data) {
+                list.push(normalizeExpense(data, docSnap.id));
+              }
+            });
+            list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(list));
+            callback(list);
+          }
+        },
+        (error) => {
+          console.warn('Firestore expense subscription error, using local cache:', error);
+          callback(this.getExpensesLocal());
+        }
+      );
+    } catch (err) {
+      console.warn('Error establishing Firestore expense listener:', err);
+      callback(this.getExpensesLocal());
+      return () => {};
+    }
+  },
+
+  subscribeCategories(callback: (categories: ExpenseCategory[]) => void): Unsubscribe {
+    try {
+      const q = query(collection(db, COLLECTIONS.EXPENSE_CATEGORIES));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            const local = this.getCategoriesLocal();
+            callback(local);
+          } else {
+            const list: ExpenseCategory[] = [];
+            snapshot.forEach((docSnap) => {
+              const data = docSnap.data() as any;
+              if (data) {
+                list.push({
+                  id: docSnap.id,
+                  name: data.name || '',
+                  color: data.color || '#3B82F6',
+                  isDefault: Boolean(data.isDefault),
+                  createdAt: data.createdAt || new Date().toISOString()
+                });
+              }
+            });
+            list.sort((a, b) => a.name.localeCompare(b.name));
+            localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(list));
+            callback(list);
+          }
+        },
+        (error) => {
+          console.warn('Firestore category subscription error, using local cache:', error);
+          callback(this.getCategoriesLocal());
+        }
+      );
+    } catch (err) {
+      console.warn('Error establishing Firestore category listener:', err);
+      callback(this.getCategoriesLocal());
+      return () => {};
+    }
+  },
+
+  async seedInitialFirestoreData(): Promise<void> {
+    try {
+      const vendorSnap = await getDocs(collection(db, COLLECTIONS.VENDORS));
+      if (vendorSnap.empty) {
+        const localVendors = this.getVendorsLocal();
+        for (const v of localVendors) {
+          await setDoc(doc(db, COLLECTIONS.VENDORS, v.id), cleanForFirestore(v));
+        }
+      }
+
+      const invoiceSnap = await getDocs(collection(db, COLLECTIONS.INVOICES));
+      if (invoiceSnap.empty) {
+        const localInvoices = this.getInvoicesLocal();
+        for (const inv of localInvoices) {
+          await setDoc(doc(db, COLLECTIONS.INVOICES, inv.id), cleanForFirestore(inv));
+        }
+      }
+
+      // Clean up any remaining dummy seed expenses and sample seed invoices from Firestore
+      const dummyInvIds = ['inv-seed-1', 'inv-seed-2', 'inv-seed-3', 'inv-seed-4'];
+      for (const sId of dummyInvIds) {
+        deleteDoc(doc(db, COLLECTIONS.INVOICES, sId)).catch(() => {});
+      }
+      const dummyIds = ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'];
+      for (const dId of dummyIds) {
+        deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
+      }
+
+      const catSnap = await getDocs(collection(db, COLLECTIONS.EXPENSE_CATEGORIES));
+      if (catSnap.empty) {
+        const localCats = this.getCategoriesLocal();
+        for (const cat of localCats) {
+          await setDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, cat.id), cleanForFirestore(cat));
+        }
+      }
+
+      const taxDocRef = doc(db, COLLECTIONS.SETTINGS, 'tax_config');
+      const taxDoc = await getDocs(collection(db, COLLECTIONS.SETTINGS));
+      if (taxDoc.empty) {
+        await setDoc(taxDocRef, cleanForFirestore(this.getTaxConfigLocal()));
+      }
+    } catch (e) {
+      console.warn('Could not seed initial Firestore data:', e);
+    }
+  },
+
+  // Local fallback getters
+  getVendorsLocal(): Vendor[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.VENDORS);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(SEED_VENDORS));
+        return SEED_VENDORS;
+      }
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : SEED_VENDORS;
+    } catch {
+      return SEED_VENDORS;
+    }
+  },
+
+  getInvoicesLocal(): Invoice[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.INVOICES);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify([]));
+        return [];
+      }
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify([]));
+        return [];
+      }
+      // Thoroughly remove any sample seed invoices (inv-seed-*)
+      const clean = parsed
+        .filter((item: any) => {
+          if (!item) return false;
+          const id = String(item.id || '');
+          if (id.startsWith('inv-seed-')) return false;
+          return true;
+        })
+        .map((item) => normalizeInvoice(item, item.id || 'inv_' + Math.random().toString(36).substring(2, 6)));
+
+      localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(clean));
+      return clean;
+    } catch {
+      return [];
+    }
+  },
+
+  getTaxConfigLocal(): TaxConfig {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.TAX_CONFIG);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.TAX_CONFIG, JSON.stringify(DEFAULT_TAX_CONFIG));
+        return DEFAULT_TAX_CONFIG;
+      }
+      return JSON.parse(data);
+    } catch {
+      return DEFAULT_TAX_CONFIG;
+    }
+  },
+
+  getExpensesLocal(): Expense[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.EXPENSES);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
+        return [];
+      }
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
+        return [];
+      }
+      // Thoroughly remove any dummy/seed expenses added in previous sessions
+      const clean = parsed
+        .filter((item: any) => {
+          if (!item) return false;
+          const id = String(item.id || '');
+          if (id.startsWith('exp-seed-') || id.startsWith('dummy-')) return false;
+          const title = String(item.title || '').toLowerCase();
+          const payee = String(item.payee || '').toLowerCase();
+          if (
+            title.includes('tow truck') ||
+            title.includes('oil change') ||
+            title.includes('routine service') ||
+            title.includes('accounting & audit') ||
+            title.includes('seed') ||
+            payee.includes('caa') ||
+            payee.includes('saaq') ||
+            payee.includes('petro')
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .map((item: any) => normalizeExpense(item, item.id || 'exp_' + Math.random().toString(36).substring(2, 6)));
+      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(clean));
+      return clean;
+    } catch {
+      return [];
+    }
+  },
+
+  getCategoriesLocal(): ExpenseCategory[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.EXPENSE_CATEGORIES);
+      if (!data) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(DEFAULT_EXPENSE_CATEGORIES));
+        return DEFAULT_EXPENSE_CATEGORIES;
+      }
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : DEFAULT_EXPENSE_CATEGORIES;
+    } catch {
+      return DEFAULT_EXPENSE_CATEGORIES;
+    }
+  },
+
+  // Synchronous convenience getters for instant initial render
+  getVendors(): Vendor[] {
+    return this.getVendorsLocal();
+  },
+
+  getInvoices(): Invoice[] {
+    return this.getInvoicesLocal();
+  },
+
+  getInvoiceById(id: string): Invoice | null {
+    return this.getInvoicesLocal().find((inv) => inv.id === id) || null;
+  },
+
+  getExpenses(): Expense[] {
+    return this.getExpensesLocal();
+  },
+
+  getExpenseById(id: string): Expense | null {
+    return this.getExpensesLocal().find((exp) => exp.id === id) || null;
+  },
+
+  getCategories(): ExpenseCategory[] {
+    return this.getCategoriesLocal();
+  },
+
+  getTaxConfig(): TaxConfig {
+    return this.getTaxConfigLocal();
+  },
+
+  // Vendor CRUD operations (Persists to Firestore + Local Cache)
+  saveVendor(vendor: Omit<Vendor, 'id' | 'createdAt'>): Vendor {
+    const newVendor: Vendor = {
+      ...vendor,
+      id: 'vendor_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      createdAt: new Date().toISOString(),
+    };
+
+    // Update local cache synchronously
+    const vendors = this.getVendorsLocal();
+    vendors.push(newVendor);
+    localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(vendors));
+
+    // Persist to Firestore with sanitized payload (stripping undefined values)
+    setDoc(doc(db, COLLECTIONS.VENDORS, newVendor.id), cleanForFirestore(newVendor)).catch((error) => {
+      console.error('Error saving vendor to Firestore:', error);
+    });
+
+    return newVendor;
+  },
+
+  updateVendor(id: string, updates: Partial<Omit<Vendor, 'id' | 'createdAt'>>): Vendor | null {
+    const vendors = this.getVendorsLocal();
+    const index = vendors.findIndex((v) => v.id === id);
+    if (index === -1) return null;
+    const updated = { ...vendors[index], ...updates };
+    vendors[index] = updated;
+    localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(vendors));
+
+    updateDoc(doc(db, COLLECTIONS.VENDORS, id), cleanForFirestore(updates)).catch((error) => {
+      console.error('Error updating vendor in Firestore:', error);
+    });
+
+    return updated;
+  },
+
+  deleteVendor(id: string): boolean {
+    const vendors = this.getVendorsLocal();
+    const filtered = vendors.filter((v) => v.id !== id);
+    if (filtered.length === vendors.length) return false;
+    localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(filtered));
+
+    deleteDoc(doc(db, COLLECTIONS.VENDORS, id)).catch((error) => {
+      console.error('Error deleting vendor from Firestore:', error);
+    });
+
+    return true;
+  },
+
+  // Invoice CRUD operations (Persists to Firestore + Local Cache)
+  saveInvoice(invoice: Omit<Invoice, 'id' | 'createdAt'>): Invoice {
+    const rawId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newInvoice = normalizeInvoice({
+      ...invoice,
+      createdAt: new Date().toISOString()
+    }, rawId);
+
+    // Cache full attachments in memory and IndexedDB immediately
+    if (newInvoice.attachments && newInvoice.attachments.length > 0) {
+      for (const att of newInvoice.attachments) {
+        if (att.dataUrl) {
+          attachmentStore.setMemoryCache(att.id, att.dataUrl);
+          attachmentStore.saveToIndexedDB(att, newInvoice.id).catch(() => {});
+        }
+      }
+    }
+
+    // Update local cache synchronously with safe pruning if quota is reached
+    const invoices = this.getInvoicesLocal();
+    invoices.unshift(newInvoice);
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    // Prepare clean sanitized invoice document for main collection (omits bulky dataUrls to stay well under 1MB)
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(newInvoice.attachments || []);
+    const docPayload = cleanForFirestore({
+      ...newInvoice,
+      attachments: sanitizedAttachments
+    });
+
+    // Persist to main Firestore invoices collection
+    setDoc(doc(db, COLLECTIONS.INVOICES, newInvoice.id), docPayload).catch((error) => {
+      console.error('Error saving invoice to Firestore:', error);
+    });
+
+    // Persist full attachments into Firestore subcollection with automatic chunking
+    if (newInvoice.attachments && newInvoice.attachments.length > 0) {
+      attachmentStore.persistAttachmentsToFirestore(newInvoice.id, newInvoice.attachments).catch((err) => {
+        console.error('Error persisting attachments subcollection:', err);
+      });
+    }
+
+    return newInvoice;
+  },
+
+  updateInvoice(id: string, updates: Partial<Invoice>): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === id);
+    if (index === -1) return null;
+    
+    const merged = { ...invoices[index], ...updates };
+    const updated = normalizeInvoice(merged, id);
+
+    // Cache full attachments in memory and IndexedDB
+    if (updated.attachments && updated.attachments.length > 0) {
+      for (const att of updated.attachments) {
+        if (att.dataUrl) {
+          attachmentStore.setMemoryCache(att.id, att.dataUrl);
+          attachmentStore.saveToIndexedDB(att, id).catch(() => {});
+        }
+      }
+    }
+
+    invoices[index] = updated;
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updated.attachments || []);
+    const docPayload = cleanForFirestore({
+      ...updated,
+      attachments: sanitizedAttachments
+    });
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, id), docPayload, { merge: true }).catch((error) => {
+      console.error('Error updating invoice in Firestore:', error);
+    });
+
+    if (updated.attachments && updated.attachments.length > 0) {
+      attachmentStore.persistAttachmentsToFirestore(id, updated.attachments).catch((err) => {
+        console.error('Error persisting attachments subcollection:', err);
+      });
+    }
+
+    return updated;
+  },
+
+  updateInvoiceStatus(id: string, status: InvoiceStatus, paymentDate?: string): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === id);
+    if (index === -1) return null;
+
+    const inv = invoices[index];
+    let amountPaid = inv.amountPaid || 0;
+    let balanceDue = inv.balanceDue !== undefined ? inv.balanceDue : Math.max(0, inv.grandTotal - amountPaid);
+    let pDate = paymentDate || inv.paymentDate;
+
+    if (status === 'PAID') {
+      amountPaid = inv.grandTotal;
+      balanceDue = 0;
+      pDate = pDate || new Date().toISOString().split('T')[0];
+    } else if (status === 'OPEN') {
+      amountPaid = 0;
+      balanceDue = inv.grandTotal;
+      pDate = undefined;
+    }
+
+    const updated: Invoice = {
+      ...inv,
+      status,
+      amountPaid,
+      balanceDue,
+      paymentDate: pDate,
+    };
+
+    invoices[index] = updated;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    updateDoc(doc(db, COLLECTIONS.INVOICES, id), cleanForFirestore({
+      status,
+      amountPaid,
+      balanceDue,
+      paymentDate: pDate || null
+    })).catch((error) => {
+      console.error('Error updating invoice status in Firestore:', error);
+    });
+
+    return updated;
+  },
+
+  recordPayment(invoiceId: string, paymentData: Omit<PaymentRecord, 'id' | 'recordedAt'>): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const newPayment: PaymentRecord = {
+      ...paymentData,
+      id: 'pmt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      recordedAt: new Date().toISOString()
+    };
+
+    const existingPayments = invoice.payments || [];
+    const updatedPayments = [...existingPayments, newPayment];
+    const amountPaid = updatedPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, invoice.grandTotal - amountPaid);
+
+    let newStatus: InvoiceStatus = 'OPEN';
+    if (amountPaid >= invoice.grandTotal - 0.001 && invoice.grandTotal > 0) {
+      newStatus = 'PAID';
+    } else if (amountPaid > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    }
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      payments: updatedPayments,
+      amountPaid,
+      balanceDue,
+      status: newStatus,
+      paymentDate: newStatus === 'PAID'
+        ? (newPayment.date || invoice.paymentDate || new Date().toISOString().split('T')[0])
+        : (amountPaid > 0 ? (newPayment.date || invoice.paymentDate) : undefined)
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error recording payment to Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  updatePayment(invoiceId: string, paymentId: string, updates: Partial<PaymentRecord>): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const existingPayments = invoice.payments || [];
+    const pIndex = existingPayments.findIndex((p) => p.id === paymentId);
+    if (pIndex === -1) return null;
+
+    const updatedPayments = [...existingPayments];
+    updatedPayments[pIndex] = { ...updatedPayments[pIndex], ...updates };
+
+    const amountPaid = updatedPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, invoice.grandTotal - amountPaid);
+
+    let newStatus: InvoiceStatus = 'OPEN';
+    if (amountPaid >= invoice.grandTotal - 0.001 && invoice.grandTotal > 0) {
+      newStatus = 'PAID';
+    } else if (amountPaid > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    }
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      payments: updatedPayments,
+      amountPaid,
+      balanceDue,
+      status: newStatus,
+      paymentDate: newStatus === 'PAID'
+        ? (updatedPayments[updatedPayments.length - 1]?.date || invoice.paymentDate || new Date().toISOString().split('T')[0])
+        : (amountPaid > 0 ? (updatedPayments[updatedPayments.length - 1]?.date || invoice.paymentDate) : undefined)
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error updating payment in Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  deletePayment(invoiceId: string, paymentId: string): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const existingPayments = invoice.payments || [];
+    const updatedPayments = existingPayments.filter((p) => p.id !== paymentId);
+
+    const amountPaid = updatedPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, invoice.grandTotal - amountPaid);
+
+    let newStatus: InvoiceStatus = 'OPEN';
+    if (amountPaid >= invoice.grandTotal - 0.001 && invoice.grandTotal > 0) {
+      newStatus = 'PAID';
+    } else if (amountPaid > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    }
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      payments: updatedPayments,
+      amountPaid,
+      balanceDue,
+      status: newStatus,
+      paymentDate: newStatus === 'PAID' ? invoice.paymentDate : (amountPaid > 0 ? invoice.paymentDate : undefined)
+    };
+
+    invoices[index] = updatedInvoice;
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+      console.error('Error deleting payment from Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  addAttachment(invoiceId: string, attachment: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>): Invoice | null {
+    return this.addAttachments(invoiceId, [attachment]);
+  },
+
+  addAttachments(invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>): Invoice | null {
+    if (!attachments || attachments.length === 0) return null;
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const newAttachments: InvoiceAttachment[] = attachments.map((att, idx) => ({
+      ...att,
+      id: 'att_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 7),
+      uploadedAt: new Date().toISOString(),
+    }));
+
+    // Cache in memory and IndexedDB immediately
+    for (const att of newAttachments) {
+      if (att.dataUrl) {
+        attachmentStore.setMemoryCache(att.id, att.dataUrl);
+        attachmentStore.saveToIndexedDB(att, invoiceId).catch(() => {});
+      }
+    }
+
+    const existingAttachments = invoice.attachments || [];
+    const updatedAttachments = [...existingAttachments, ...newAttachments];
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      attachments: updatedAttachments
+    };
+
+    invoices[index] = updatedInvoice;
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updatedAttachments);
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
+      attachments: sanitizedAttachments
+    }), { merge: true }).catch((error) => {
+      console.error('Error saving attachments to Firestore:', error);
+    });
+
+    attachmentStore.persistAttachmentsToFirestore(invoiceId, newAttachments).catch((err) => {
+      console.error('Error persisting attachment subcollection:', err);
+    });
+
+    return updatedInvoice;
+  },
+
+  removeAttachment(invoiceId: string, attachmentId: string): Invoice | null {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) return null;
+
+    const invoice = invoices[index];
+    const existingAttachments = invoice.attachments || [];
+    const updatedAttachments = existingAttachments.filter((a) => a.id !== attachmentId);
+
+    attachmentStore.deleteAttachment(invoiceId, attachmentId).catch(() => {});
+
+    const updatedInvoice: Invoice = {
+      ...invoice,
+      attachments: updatedAttachments
+    };
+
+    invoices[index] = updatedInvoice;
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updatedAttachments);
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
+      attachments: sanitizedAttachments
+    }), { merge: true }).catch((error) => {
+      console.error('Error removing attachment from Firestore:', error);
+    });
+
+    return updatedInvoice;
+  },
+
+  async getAttachmentDataUrl(invoiceId: string, attachmentId: string): Promise<string | null> {
+    return attachmentStore.getAttachmentDataUrl(attachmentId, invoiceId);
+  },
+
+  deleteInvoice(id: string): boolean {
+    const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === id);
+    if (index === -1) return false;
+
+    const inv = invoices[index];
+    if (inv.attachments && inv.attachments.length > 0) {
+      for (const att of inv.attachments) {
+        attachmentStore.deleteAttachment(id, att.id).catch(() => {});
+      }
+    }
+
+    const filtered = invoices.filter((i) => i.id !== id);
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(filtered));
+
+    deleteDoc(doc(db, COLLECTIONS.INVOICES, id)).catch((error) => {
+      console.error('Error deleting invoice from Firestore:', error);
+    });
+
+    return true;
+  },
+
+  isInvoiceNumberTaken(invoiceNumber: string, excludeId?: string): boolean {
+    const normalized = invoiceNumber.trim().toUpperCase();
+    const invoices = this.getInvoicesLocal();
+    return invoices.some((inv) => inv.invoiceNumber.trim().toUpperCase() === normalized && inv.id !== excludeId);
+  },
+
+  saveTaxConfig(config: TaxConfig): void {
+    localStorage.setItem(STORAGE_KEYS.TAX_CONFIG, JSON.stringify(config));
+    setDoc(doc(db, COLLECTIONS.SETTINGS, 'tax_config'), cleanForFirestore(config)).catch((error) => {
+      console.error('Error saving tax config to Firestore:', error);
+    });
+  },
+
+  // Expense CRUD operations (Persists to Firestore + Local Cache)
+  saveExpense(expenseData: Omit<Expense, 'id' | 'createdAt'>): Expense {
+    const rawId = 'exp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newExpense = normalizeExpense({
+      ...expenseData,
+      createdAt: new Date().toISOString()
+    }, rawId);
+
+    const expenses = this.getExpensesLocal();
+    expenses.unshift(newExpense);
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+
+    setDoc(doc(db, COLLECTIONS.EXPENSES, newExpense.id), cleanForFirestore(newExpense)).catch((error) => {
+      console.error('Error saving expense to Firestore:', error);
+    });
+
+    return newExpense;
+  },
+
+  updateExpense(id: string, updates: Partial<Expense>): Expense | null {
+    const expenses = this.getExpensesLocal();
+    const index = expenses.findIndex((e) => e.id === id);
+    if (index === -1) return null;
+
+    const merged = { ...expenses[index], ...updates };
+    const updated = normalizeExpense(merged, id);
+    expenses[index] = updated;
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+
+    setDoc(doc(db, COLLECTIONS.EXPENSES, id), cleanForFirestore(updated), { merge: true }).catch((error) => {
+      console.error('Error updating expense in Firestore:', error);
+    });
+
+    return updated;
+  },
+
+  deleteExpense(id: string): boolean {
+    const expenses = this.getExpensesLocal();
+    const filtered = expenses.filter((e) => e.id !== id);
+    if (filtered.length === expenses.length) return false;
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(filtered));
+
+    deleteDoc(doc(db, COLLECTIONS.EXPENSES, id)).catch((error) => {
+      console.error('Error deleting expense from Firestore:', error);
+    });
+
+    return true;
+  },
+
+  // Category CRUD operations
+  saveCategory(name: string, color?: string): ExpenseCategory {
+    const trimmed = name.trim();
+    const categories = this.getCategoriesLocal();
+    const existing = categories.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing;
+
+    const newCat: ExpenseCategory = {
+      id: 'cat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name: trimmed,
+      color: color || '#6366F1',
+      isDefault: false,
+      createdAt: new Date().toISOString()
+    };
+
+    categories.push(newCat);
+    localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(categories));
+
+    setDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, newCat.id), cleanForFirestore(newCat)).catch((error) => {
+      console.error('Error saving category to Firestore:', error);
+    });
+
+    return newCat;
+  },
+
+  deleteCategory(id: string): boolean {
+    const categories = this.getCategoriesLocal();
+    const filtered = categories.filter((c) => c.id !== id);
+    if (filtered.length === categories.length) return false;
+    localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(filtered));
+
+    deleteDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, id)).catch((error) => {
+      console.error('Error deleting category from Firestore:', error);
+    });
+
+    return true;
+  },
+
+  getAuthSession(): { isAuthenticated: boolean; username: string } {
+    try {
+      const data = sessionStorage.getItem(STORAGE_KEYS.AUTH) || localStorage.getItem(STORAGE_KEYS.AUTH);
+      if (data) {
+        return JSON.parse(data);
+      }
+    } catch {}
+    return { isAuthenticated: false, username: '' };
+  },
+
+  setAuthSession(session: { isAuthenticated: boolean; username: string }, remember: boolean = true): void {
+    if (session.isAuthenticated) {
+      if (remember) {
+        localStorage.setItem(STORAGE_KEYS.AUTH, JSON.stringify(session));
+      } else {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH, JSON.stringify(session));
+      }
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.AUTH);
+      sessionStorage.removeItem(STORAGE_KEYS.AUTH);
+    }
+  },
+
+  async resetAllData(): Promise<void> {
+    localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(SEED_VENDORS));
+    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(DEFAULT_EXPENSE_CATEGORIES));
+    localStorage.setItem(STORAGE_KEYS.TAX_CONFIG, JSON.stringify(DEFAULT_TAX_CONFIG));
+
+    try {
+      for (const v of SEED_VENDORS) {
+        await setDoc(doc(db, COLLECTIONS.VENDORS, v.id), cleanForFirestore(v));
+      }
+      const dummyInvIds = ['inv-seed-1', 'inv-seed-2', 'inv-seed-3', 'inv-seed-4'];
+      for (const sId of dummyInvIds) {
+        await deleteDoc(doc(db, COLLECTIONS.INVOICES, sId)).catch(() => {});
+      }
+      const dummyIds = ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'];
+      for (const dId of dummyIds) {
+        await deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
+      }
+      for (const cat of DEFAULT_EXPENSE_CATEGORIES) {
+        await setDoc(doc(db, COLLECTIONS.EXPENSE_CATEGORIES, cat.id), cleanForFirestore(cat));
+      }
+      await setDoc(doc(db, COLLECTIONS.SETTINGS, 'tax_config'), cleanForFirestore(DEFAULT_TAX_CONFIG));
+    } catch (e) {
+      console.error('Error resetting Firestore data:', e);
+    }
+  }
+};
+
+// Immediate cleanup of any legacy sample seed invoices and dummy expenses from local storage and Firestore
+try {
+  // 1. Clean legacy seed invoices from local storage immediately so there is zero initial flicker
+  const storedInvoices = localStorage.getItem(STORAGE_KEYS.INVOICES);
+  if (storedInvoices) {
+    const parsed = JSON.parse(storedInvoices);
+    if (Array.isArray(parsed)) {
+      const filtered = parsed.filter((inv: any) => {
+        if (!inv) return false;
+        const id = String(inv.id || '');
+        return !id.startsWith('inv-seed-');
+      });
+      localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(filtered));
+    }
+  }
+  ['inv-seed-1', 'inv-seed-2', 'inv-seed-3', 'inv-seed-4'].forEach((sId) => {
+    deleteDoc(doc(db, COLLECTIONS.INVOICES, sId)).catch(() => {});
+  });
+
+  // 2. Clean legacy dummy expenses from local storage and Firestore
+  const storedExpenses = localStorage.getItem(STORAGE_KEYS.EXPENSES);
+  if (storedExpenses) {
+    const parsed = JSON.parse(storedExpenses);
+    if (Array.isArray(parsed)) {
+      const filtered = parsed.filter((e: any) => {
+        if (!e) return false;
+        const id = String(e.id || '');
+        if (id.startsWith('exp-seed-') || id.startsWith('dummy-')) return false;
+        const title = String(e.title || '').toLowerCase();
+        const payee = String(e.payee || '').toLowerCase();
+        if (
+          title.includes('tow truck') ||
+          title.includes('oil change') ||
+          title.includes('routine service') ||
+          title.includes('accounting & audit') ||
+          title.includes('seed') ||
+          payee.includes('caa') ||
+          payee.includes('saaq') ||
+          payee.includes('petro')
+        ) {
+          return false;
+        }
+        return true;
+      });
+      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(filtered));
+    }
+  }
+  ['exp-seed-1', 'exp-seed-2', 'exp-seed-3'].forEach((dId) => {
+    deleteDoc(doc(db, COLLECTIONS.EXPENSES, dId)).catch(() => {});
+  });
+} catch (e) {
+  // ignore
+}
