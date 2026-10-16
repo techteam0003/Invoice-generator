@@ -122,9 +122,9 @@ export default function App() {
   };
 
   // Invoice handlers
-  const handleSaveInvoice = (invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Invoice | null => {
+  const handleSaveInvoice = async (invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice | null> => {
     try {
-      const saved = storage.saveInvoice(invoiceData);
+      const saved = await storage.saveInvoice(invoiceData);
       setInvoices(storage.getInvoices());
       const attCount = saved.attachments?.length || 0;
       showToast(`Invoice ${saved.invoiceNumber} saved permanently to Firestore${attCount > 0 ? ` with ${attCount} attachment(s)` : ''}.`);
@@ -185,9 +185,9 @@ export default function App() {
     setActiveTab(tabBeforeEdit || 'all-invoices');
   };
 
-  const handleUpdateInvoice = (invoiceId: string, updates: Partial<Invoice>): Invoice | null => {
+  const handleUpdateInvoice = async (invoiceId: string, updates: Partial<Invoice>): Promise<Invoice | null> => {
     try {
-      const updated = storage.updateInvoice(invoiceId, updates);
+      const updated = await storage.updateInvoice(invoiceId, updates);
       setInvoices(storage.getInvoices());
       if (previewInvoice && previewInvoice.id === invoiceId && updated) {
         setPreviewInvoice(updated);

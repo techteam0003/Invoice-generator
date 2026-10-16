@@ -267,7 +267,7 @@ export const attachmentStore = {
 
         if (chunks.length <= 1) {
           payload.dataUrl = dataUrl;
-          payload.chunks = chunks;
+          payload.chunks = [];
         } else {
           payload.chunks = chunks;
           payload.dataUrl = ''; // omit monolithic field to keep doc under 1MB
@@ -276,6 +276,7 @@ export const attachmentStore = {
         await setDoc(attDocRef, payload, { merge: true });
       } catch (err) {
         console.error(`[attachmentStore] Error persisting attachment ${att.id} to Firestore:`, err);
+        throw err;
       }
     }
   },
@@ -305,22 +306,17 @@ export const attachmentStore = {
 
   /**
    * Prepares attachments for embedding in the main invoice document.
-   * If an attachment is small (< 75KB), it keeps dataUrl inline for instant offline preview;
-   * otherwise, dataUrl is omitted from the main invoice document so it never exceeds 1MB.
+   * Keeps main document strictly to metadata so the invoice document is feather-light (<5KB)
+   * and never exceeds Firestore's 1MB limit, even with 20+ attachments.
    */
   sanitizeForInvoiceDoc(attachments: InvoiceAttachment[]): InvoiceAttachment[] {
-    return attachments.map((att) => {
-      const dataUrl = att.dataUrl || this.getMemoryCache(att.id) || '';
-      return {
-        id: att.id,
-        name: att.name,
-        size: att.size,
-        type: att.type,
-        uploadedAt: att.uploadedAt,
-        // Inline small attachments (<75KB dataUrl string length) for instant access;
-        // large files are fetched on demand from IndexedDB / Firestore subcollection
-        dataUrl: dataUrl.length < 75000 ? dataUrl : '',
-      };
-    });
+    return attachments.map((att) => ({
+      id: att.id,
+      name: att.name,
+      size: att.size,
+      type: att.type,
+      uploadedAt: att.uploadedAt,
+      dataUrl: '', // Omit large binary from parent doc; retrieved on demand from attachmentStore
+    }));
   }
 };

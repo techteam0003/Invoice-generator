@@ -714,51 +714,58 @@ export const storage = {
   },
 
   // Invoice CRUD operations (Persists to Firestore + Local Cache)
-  saveInvoice(invoice: Omit<Invoice, 'id' | 'createdAt'>): Invoice {
+  async saveInvoice(invoice: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice> {
     const rawId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const newInvoice = normalizeInvoice({
       ...invoice,
       createdAt: new Date().toISOString()
     }, rawId);
 
-    // Cache full attachments in memory and IndexedDB immediately
+    // 1. Cache full attachments in memory and IndexedDB immediately
     if (newInvoice.attachments && newInvoice.attachments.length > 0) {
       for (const att of newInvoice.attachments) {
         if (att.dataUrl) {
           attachmentStore.setMemoryCache(att.id, att.dataUrl);
-          attachmentStore.saveToIndexedDB(att, newInvoice.id).catch(() => {});
+          await attachmentStore.saveToIndexedDB(att, newInvoice.id).catch(() => {});
         }
       }
     }
 
-    // Update local cache synchronously with safe pruning if quota is reached
+    // 2. Update local cache synchronously with safe pruning if quota is reached
     const invoices = this.getInvoicesLocal();
     invoices.unshift(newInvoice);
     safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
-    // Prepare clean sanitized invoice document for main collection (omits bulky dataUrls to stay well under 1MB)
+    // 3. Prepare clean sanitized invoice document for main collection (metadata only, keeping it under 5KB)
     const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(newInvoice.attachments || []);
     const docPayload = cleanForFirestore({
       ...newInvoice,
       attachments: sanitizedAttachments
     });
 
-    // Persist to main Firestore invoices collection
-    setDoc(doc(db, COLLECTIONS.INVOICES, newInvoice.id), docPayload).catch((error) => {
-      console.error('Error saving invoice to Firestore:', error);
-    });
+    // 4. Await Firestore save to guarantee database persistence
+    try {
+      await setDoc(doc(db, COLLECTIONS.INVOICES, newInvoice.id), docPayload);
+      console.log(`[storage] Successfully created invoice ${newInvoice.invoiceNumber} in Firestore.`);
+    } catch (error: any) {
+      console.error('[storage] Error saving invoice to Firestore:', error);
+      throw new Error(`Failed to save invoice to Firestore: ${error?.message || error}`);
+    }
 
-    // Persist full attachments into Firestore subcollection with automatic chunking
+    // 5. Persist full attachments into Firestore subcollection with automatic chunking
     if (newInvoice.attachments && newInvoice.attachments.length > 0) {
-      attachmentStore.persistAttachmentsToFirestore(newInvoice.id, newInvoice.attachments).catch((err) => {
-        console.error('Error persisting attachments subcollection:', err);
-      });
+      try {
+        await attachmentStore.persistAttachmentsToFirestore(newInvoice.id, newInvoice.attachments);
+        console.log(`[storage] Successfully saved ${newInvoice.attachments.length} attachments to Firestore.`);
+      } catch (err: any) {
+        console.error('[storage] Error persisting attachments subcollection:', err);
+      }
     }
 
     return newInvoice;
   },
 
-  updateInvoice(id: string, updates: Partial<Invoice>): Invoice | null {
+  async updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice | null> {
     const invoices = this.getInvoicesLocal();
     const index = invoices.findIndex((i) => i.id === id);
     if (index === -1) return null;
@@ -766,33 +773,43 @@ export const storage = {
     const merged = { ...invoices[index], ...updates };
     const updated = normalizeInvoice(merged, id);
 
-    // Cache full attachments in memory and IndexedDB
+    // 1. Cache full attachments in memory and IndexedDB
     if (updated.attachments && updated.attachments.length > 0) {
       for (const att of updated.attachments) {
         if (att.dataUrl) {
           attachmentStore.setMemoryCache(att.id, att.dataUrl);
-          attachmentStore.saveToIndexedDB(att, id).catch(() => {});
+          await attachmentStore.saveToIndexedDB(att, id).catch(() => {});
         }
       }
     }
 
+    // 2. Update local cache
     invoices[index] = updated;
     safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
+    // 3. Prepare sanitized payload for main collection
     const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updated.attachments || []);
     const docPayload = cleanForFirestore({
       ...updated,
       attachments: sanitizedAttachments
     });
 
-    setDoc(doc(db, COLLECTIONS.INVOICES, id), docPayload, { merge: true }).catch((error) => {
-      console.error('Error updating invoice in Firestore:', error);
-    });
+    // 4. Await Firestore update
+    try {
+      await setDoc(doc(db, COLLECTIONS.INVOICES, id), docPayload, { merge: true });
+      console.log(`[storage] Successfully updated invoice ${updated.invoiceNumber} in Firestore.`);
+    } catch (error: any) {
+      console.error('[storage] Error updating invoice in Firestore:', error);
+      throw new Error(`Failed to update invoice in Firestore: ${error?.message || error}`);
+    }
 
+    // 5. Persist attachments in Firestore subcollection
     if (updated.attachments && updated.attachments.length > 0) {
-      attachmentStore.persistAttachmentsToFirestore(id, updated.attachments).catch((err) => {
-        console.error('Error persisting attachments subcollection:', err);
-      });
+      try {
+        await attachmentStore.persistAttachmentsToFirestore(id, updated.attachments);
+      } catch (err: any) {
+        console.error('[storage] Error updating attachments subcollection:', err);
+      }
     }
 
     return updated;
