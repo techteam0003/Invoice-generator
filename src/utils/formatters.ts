@@ -1,3 +1,5 @@
+import { attachmentStore } from '../services/attachmentStore';
+
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-CA', {
     style: 'currency',
@@ -54,10 +56,18 @@ export function getTodayDateString(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export function downloadAttachment(att: { name: string; dataUrl: string }): void {
+export async function downloadAttachment(att: { id?: string; name: string; dataUrl?: string }, invoiceId?: string): Promise<void> {
   try {
+    let dataUrl = att.dataUrl;
+    if (!dataUrl && att.id) {
+      dataUrl = (await attachmentStore.getAttachmentDataUrl(att.id, invoiceId)) || '';
+    }
+    if (!dataUrl) {
+      console.warn('Cannot download attachment without dataUrl:', att.name);
+      return;
+    }
     const link = document.createElement('a');
-    link.href = att.dataUrl;
+    link.href = dataUrl;
     link.download = att.name;
     document.body.appendChild(link);
     link.click();
@@ -67,10 +77,10 @@ export function downloadAttachment(att: { name: string; dataUrl: string }): void
   }
 }
 
-export function downloadAllAttachments(attachments: Array<{ name: string; dataUrl: string }>): void {
+export function downloadAllAttachments(attachments: Array<{ id?: string; name: string; dataUrl?: string }>, invoiceId?: string): void {
   attachments.forEach((att, idx) => {
     setTimeout(() => {
-      downloadAttachment(att);
+      downloadAttachment(att, invoiceId);
     }, idx * 250);
   });
 }

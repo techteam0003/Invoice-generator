@@ -122,11 +122,18 @@ export default function App() {
   };
 
   // Invoice handlers
-  const handleSaveInvoice = (invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Invoice | null => {
-    const saved = storage.saveInvoice(invoiceData);
-    setInvoices(storage.getInvoices());
-    showToast(`Invoice ${saved.invoiceNumber} saved permanently to Firestore.`);
-    return saved;
+  const handleSaveInvoice = async (invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice | null> => {
+    try {
+      const saved = await storage.saveInvoice(invoiceData);
+      setInvoices(storage.getInvoices());
+      const attCount = saved.attachments?.length || 0;
+      showToast(`Invoice ${saved.invoiceNumber} saved permanently to Firestore${attCount > 0 ? ` with ${attCount} attachment(s)` : ''}.`);
+      return saved;
+    } catch (err: any) {
+      console.error('Failed to save invoice:', err);
+      showToast(`Failed to save invoice: ${err?.message || 'Storage error'}`);
+      throw err;
+    }
   };
 
   const handleMarkAsPaid = (invoiceId: string, paymentDate?: string) => {
@@ -178,14 +185,21 @@ export default function App() {
     setActiveTab(tabBeforeEdit || 'all-invoices');
   };
 
-  const handleUpdateInvoice = (invoiceId: string, updates: Partial<Invoice>): Invoice | null => {
-    const updated = storage.updateInvoice(invoiceId, updates);
-    setInvoices(storage.getInvoices());
-    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
-      setPreviewInvoice(updated);
+  const handleUpdateInvoice = async (invoiceId: string, updates: Partial<Invoice>): Promise<Invoice | null> => {
+    try {
+      const updated = await storage.updateInvoice(invoiceId, updates);
+      setInvoices(storage.getInvoices());
+      if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+        setPreviewInvoice(updated);
+      }
+      const attCount = updated?.attachments?.length || 0;
+      showToast(`Invoice #${updated?.invoiceNumber || invoiceId} updated & saved to Firestore${attCount > 0 ? ` with ${attCount} attachment(s)` : ''}.`);
+      return updated;
+    } catch (err: any) {
+      console.error('Failed to update invoice:', err);
+      showToast(`Failed to update invoice: ${err?.message || 'Storage error'}`);
+      throw err;
     }
-    showToast(`Invoice #${updated?.invoiceNumber || invoiceId} updated & saved to Firestore.`);
-    return updated;
   };
 
   const handleInvoiceUpdated = (invoice: Invoice) => {

@@ -28,14 +28,15 @@ import {
 import { Invoice, InvoiceItem, InvoiceStatus, Vendor, TaxType, TaxConfig, PaymentRecord, InvoiceAttachment } from '../types';
 import { MasterInvoiceSheet } from './MasterInvoiceSheet';
 import { getTodayDateString, formatDateToDisplay, formatRawAmount, formatCurrency } from '../utils/formatters';
+import { optimizeImageFile, readFileAsDataUrl } from '../services/attachmentStore';
 
 interface CreateInvoiceViewProps {
   vendors: Vendor[];
   taxConfig: TaxConfig;
   initialVendor?: Vendor | null;
   editingInvoice?: Invoice | null;
-  onSaveInvoice: (invoiceData: Omit<Invoice, 'id' | 'createdAt'>) => Invoice | null;
-  onUpdateInvoice?: (id: string, invoiceData: Partial<Invoice>) => Invoice | null;
+  onSaveInvoice: (invoiceData: Omit<Invoice, 'id' | 'createdAt'>) => Invoice | null | Promise<Invoice | null>;
+  onUpdateInvoice?: (id: string, invoiceData: Partial<Invoice>) => Invoice | null | Promise<Invoice | null>;
   onCancelEdit?: () => void;
   onOpenVendorModal: () => void;
   isInvoiceNumberTaken: (num: string, excludeId?: string) => boolean;
@@ -73,6 +74,8 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
   // Attachments (Images & PDFs)
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [isProcessingAttachments, setIsProcessingAttachments] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
 
   // 2. Vendor Selection & Bill To
@@ -268,14 +271,18 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     };
   }, [subtotal, taxType, customTaxRate]);
 
-  // File Upload Handlers for Attachments (Supports multiple files at once)
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // File Upload Handlers for Attachments (Supports multiple files up to 5MB, auto-optimized)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = e.target.files ? Array.from(e.target.files) : [];
     if (files.length === 0) return;
 
+    setAttachmentError(null);
+    setIsProcessingAttachments(true);
+
     const oversizedFiles: string[] = [];
     const validFiles: File[] = files.filter((file: File) => {
-      if (file.size > 1.5 * 1024 * 1024) {
+      // Support up to 5MB per attachment
+      if (file.size > 5 * 1024 * 1024) {
         oversizedFiles.push(file.name);
         return false;
       }
@@ -283,44 +290,42 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     });
 
     if (oversizedFiles.length > 0) {
-      setAttachmentError(`Skipped ${oversizedFiles.length} file(s) exceeding 1.5MB limit: ${oversizedFiles.join(', ')}`);
-    } else {
-      setAttachmentError(null);
+      setAttachmentError(`Skipped ${oversizedFiles.length} file(s) exceeding 5MB limit: ${oversizedFiles.join(', ')}`);
     }
 
     if (validFiles.length === 0) {
+      setIsProcessingAttachments(false);
       if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
       return;
     }
 
-    const readPromises = validFiles.map((file: File) => {
-      return new Promise<InvoiceAttachment>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const dataUrl = event.target?.result as string;
-          resolve({
-            id: 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-            name: file.name,
-            size: file.size,
-            type: file.type || 'application/octet-stream',
-            dataUrl,
-            uploadedAt: new Date().toISOString(),
-          });
-        };
-        reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
-        reader.readAsDataURL(file);
-      });
-    });
+    try {
+      const readPromises = validFiles.map(async (file: File) => {
+        let dataUrl = '';
+        if (file.type.startsWith('image/')) {
+          dataUrl = await optimizeImageFile(file);
+        } else {
+          dataUrl = await readFileAsDataUrl(file);
+        }
 
-    Promise.all(readPromises)
-      .then((newAttachments) => {
-        setAttachments((prev) => [...prev, ...newAttachments]);
-        if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
-      })
-      .catch(() => {
-        setAttachmentError('Failed to process one or more files. Please try again.');
-        if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
+        return {
+          id: 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          dataUrl,
+          uploadedAt: new Date().toISOString(),
+        } as InvoiceAttachment;
       });
+
+      const newAttachments = await Promise.all(readPromises);
+      setAttachments((prev) => [...prev, ...newAttachments]);
+    } catch {
+      setAttachmentError('Failed to process one or more files. Please try again.');
+    } finally {
+      setIsProcessingAttachments(false);
+      if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = '';
+    }
   };
 
   const handleRemoveAttachment = (id: string) => {
@@ -436,7 +441,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
   ]);
 
   // Validation and Generation / Updating
-  const handleGenerateInvoice = (e: React.FormEvent) => {
+  const handleGenerateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
@@ -499,72 +504,81 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       amount: Math.round(Number(item.quantity) * Number(item.rate) * 100) / 100,
     }));
 
-    if (editingInvoice && onUpdateInvoice) {
-      const updatedData: Partial<Invoice> = {
-        invoiceNumber: cleanNumber,
-        invoiceDate: invoiceDate,
-        dueDate: dueDate,
-        vendorId: selectedVendor.id,
-        vendor: {
-          companyName: selectedVendor.companyName,
-          address: selectedVendor.address,
-          phone: selectedVendor.phone,
-          email: selectedVendor.email,
-        },
-        items: processedItems,
-        subtotal,
-        taxType,
-        taxRate: effectiveTaxRate,
-        taxAmount,
-        gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
-        qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
-        grandTotal,
-        status: invoiceStatus,
-        paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
-        notes: notes.trim() || undefined,
-        payments: resolvedPayments,
-        amountPaid: computedPaid,
-        balanceDue: computedBalance,
-        attachments,
-      };
+    try {
+      setIsSaving(true);
 
-      const updated = onUpdateInvoice(editingInvoice.id, updatedData);
-      if (updated && onInvoiceUpdated) {
-        onInvoiceUpdated(updated);
-      }
-    } else {
-      const invoiceData: Omit<Invoice, 'id' | 'createdAt'> = {
-        invoiceNumber: cleanNumber,
-        invoiceDate: invoiceDate,
-        dueDate: dueDate,
-        vendorId: selectedVendor.id,
-        vendor: {
-          companyName: selectedVendor.companyName,
-          address: selectedVendor.address,
-          phone: selectedVendor.phone,
-          email: selectedVendor.email,
-        },
-        items: processedItems,
-        subtotal,
-        taxType,
-        taxRate: effectiveTaxRate,
-        taxAmount,
-        gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
-        qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
-        grandTotal,
-        status: invoiceStatus,
-        paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
-        notes: notes.trim() || undefined,
-        payments: resolvedPayments,
-        amountPaid: computedPaid,
-        balanceDue: computedBalance,
-        attachments,
-      };
+      if (editingInvoice && onUpdateInvoice) {
+        const updatedData: Partial<Invoice> = {
+          invoiceNumber: cleanNumber,
+          invoiceDate: invoiceDate,
+          dueDate: dueDate,
+          vendorId: selectedVendor.id,
+          vendor: {
+            companyName: selectedVendor.companyName,
+            address: selectedVendor.address,
+            phone: selectedVendor.phone,
+            email: selectedVendor.email,
+          },
+          items: processedItems,
+          subtotal,
+          taxType,
+          taxRate: effectiveTaxRate,
+          taxAmount,
+          gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
+          qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
+          grandTotal,
+          status: invoiceStatus,
+          paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
+          notes: notes.trim() || undefined,
+          payments: resolvedPayments,
+          amountPaid: computedPaid,
+          balanceDue: computedBalance,
+          attachments,
+        };
 
-      const created = onSaveInvoice(invoiceData);
-      if (created) {
-        onInvoiceCreated(created);
+        const updated = await onUpdateInvoice(editingInvoice.id, updatedData);
+        if (updated && onInvoiceUpdated) {
+          onInvoiceUpdated(updated);
+        }
+      } else {
+        const invoiceData: Omit<Invoice, 'id' | 'createdAt'> = {
+          invoiceNumber: cleanNumber,
+          invoiceDate: invoiceDate,
+          dueDate: dueDate,
+          vendorId: selectedVendor.id,
+          vendor: {
+            companyName: selectedVendor.companyName,
+            address: selectedVendor.address,
+            phone: selectedVendor.phone,
+            email: selectedVendor.email,
+          },
+          items: processedItems,
+          subtotal,
+          taxType,
+          taxRate: effectiveTaxRate,
+          taxAmount,
+          gstAmount: taxType === 'QUEBEC' ? gstAmount : undefined,
+          qstAmount: taxType === 'QUEBEC' ? qstAmount : undefined,
+          grandTotal,
+          status: invoiceStatus,
+          paymentDate: invoiceStatus !== 'OPEN' ? (paymentDate || invoiceDate) : undefined,
+          notes: notes.trim() || undefined,
+          payments: resolvedPayments,
+          amountPaid: computedPaid,
+          balanceDue: computedBalance,
+          attachments,
+        };
+
+        const created = await onSaveInvoice(invoiceData);
+        if (created) {
+          onInvoiceCreated(created);
+        }
       }
+    } catch (err: any) {
+      console.error('Error saving invoice with attachments:', err);
+      setFormError(`Failed to save invoice: ${err?.message || 'Please check attachment size and connection'}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1234,8 +1248,10 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                         <Paperclip className="w-5 h-5" />
                       </div>
                       <div>
-                        <p className="text-xs font-bold text-slate-800">Upload Attachments (Images or PDFs)</p>
-                        <p className="text-[11px] text-slate-500">Supports PNG, JPG, JPEG, WEBP, and PDF files (select one or multiple files, up to 1.5MB each)</p>
+                        <p className="text-xs font-bold text-slate-800">Upload Attachments (Images, PDFs, Documents)</p>
+                        <p className="text-[11px] text-slate-500">
+                          Supports PNG, JPG, JPEG, WEBP, and PDF files (select one or multiple files, up to 5MB each)
+                        </p>
                       </div>
                     </div>
                     <div>
@@ -1245,15 +1261,27 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                         multiple
                         accept="image/*,application/pdf"
                         onChange={handleFileUpload}
+                        disabled={isProcessingAttachments}
                         className="hidden"
                         id="invoice-file-upload-input"
                       />
                       <label
                         htmlFor="invoice-file-upload-input"
-                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-2 cursor-pointer shadow-xs inline-flex"
+                        className={`px-3.5 py-2 text-white text-xs font-bold rounded-lg transition flex items-center gap-2 cursor-pointer shadow-xs inline-flex ${
+                          isProcessingAttachments ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
                       >
-                        <UploadCloud className="w-4 h-4" />
-                        <span>Upload Files</span>
+                        {isProcessingAttachments ? (
+                          <>
+                            <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            <span>Processing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <UploadCloud className="w-4 h-4" />
+                            <span>Upload Files</span>
+                          </>
+                        )}
                       </label>
                     </div>
                   </div>
@@ -1354,13 +1382,21 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                 <button
                   type="submit"
                   id="generate-invoice-btn"
-                  className={`px-6 py-2.5 text-white text-xs font-bold rounded-lg shadow-md transition flex items-center gap-2 cursor-pointer ${
-                    editingInvoice
-                      ? 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800 shadow-amber-600/25'
-                      : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-indigo-600/25'
+                  disabled={isSaving}
+                  className={`px-6 py-2.5 text-white text-xs font-bold rounded-lg shadow-md transition flex items-center gap-2 ${
+                    isSaving
+                      ? 'bg-slate-400 cursor-not-allowed opacity-80'
+                      : editingInvoice
+                      ? 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800 shadow-amber-600/25 cursor-pointer'
+                      : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-indigo-600/25 cursor-pointer'
                   }`}
                 >
-                  {editingInvoice ? (
+                  {isSaving ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      <span>{editingInvoice ? 'Saving Updates...' : 'Generating & Saving Invoice...'}</span>
+                    </>
+                  ) : editingInvoice ? (
                     <>
                       <Save className="w-4 h-4" />
                       <span>Save & Update Database</span>

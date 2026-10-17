@@ -12,6 +12,7 @@ import {
   Plus
 } from 'lucide-react';
 import { Invoice, InvoiceAttachment } from '../types';
+import { attachmentStore, optimizeImageFile, readFileAsDataUrl } from '../services/attachmentStore';
 
 interface AttachmentViewerModalProps {
   isOpen: boolean;
@@ -53,7 +54,8 @@ export const AttachmentViewerModal: React.FC<AttachmentViewerModalProps> = ({
 
     const oversizedFiles: string[] = [];
     const validFiles: File[] = files.filter((f: File) => {
-      if (f.size > 1.5 * 1024 * 1024) {
+      // Support up to 5MB
+      if (f.size > 5 * 1024 * 1024) {
         oversizedFiles.push(f.name);
         return false;
       }
@@ -61,7 +63,7 @@ export const AttachmentViewerModal: React.FC<AttachmentViewerModalProps> = ({
     });
 
     if (oversizedFiles.length > 0) {
-      setUploadError(`Skipped ${oversizedFiles.length} file(s) exceeding 1.5MB: ${oversizedFiles.join(', ')}`);
+      setUploadError(`Skipped ${oversizedFiles.length} file(s) exceeding 5MB: ${oversizedFiles.join(', ')}`);
     }
 
     if (validFiles.length === 0) {
@@ -72,25 +74,20 @@ export const AttachmentViewerModal: React.FC<AttachmentViewerModalProps> = ({
     setIsUploading(true);
 
     try {
-      const readPromises = validFiles.map((file: File) => {
-        return new Promise<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const dataUrl = event.target?.result as string;
-            if (dataUrl) {
-              resolve({
-                name: file.name,
-                size: file.size,
-                type: file.type || 'application/octet-stream',
-                dataUrl,
-              });
-            } else {
-              reject(new Error(`Failed to read ${file.name}`));
-            }
-          };
-          reader.onerror = () => reject(new Error(`Error reading ${file.name}`));
-          reader.readAsDataURL(file);
-        });
+      const readPromises = validFiles.map(async (file: File) => {
+        let dataUrl = '';
+        if (file.type.startsWith('image/')) {
+          dataUrl = await optimizeImageFile(file);
+        } else {
+          dataUrl = await readFileAsDataUrl(file);
+        }
+
+        return {
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          dataUrl,
+        } as Omit<InvoiceAttachment, 'id' | 'uploadedAt'>;
       });
 
       const loadedAttachments = await Promise.all(readPromises);
@@ -110,9 +107,25 @@ export const AttachmentViewerModal: React.FC<AttachmentViewerModalProps> = ({
     }
   };
 
-  const handleDownload = (att: InvoiceAttachment) => {
+  const handleOpenPreview = async (att: InvoiceAttachment) => {
+    let dataUrl = att.dataUrl;
+    if (!dataUrl) {
+      dataUrl = (await attachmentStore.getAttachmentDataUrl(att.id, invoice.id)) || '';
+    }
+    setSelectedAttachment({ ...att, dataUrl });
+  };
+
+  const handleDownload = async (att: InvoiceAttachment) => {
+    let dataUrl = att.dataUrl;
+    if (!dataUrl) {
+      dataUrl = (await attachmentStore.getAttachmentDataUrl(att.id, invoice.id)) || '';
+    }
+    if (!dataUrl) {
+      alert('Could not retrieve attachment content.');
+      return;
+    }
     const link = document.createElement('a');
-    link.href = att.dataUrl;
+    link.href = dataUrl;
     link.download = att.name;
     document.body.appendChild(link);
     link.click();
@@ -255,14 +268,20 @@ export const AttachmentViewerModal: React.FC<AttachmentViewerModalProps> = ({
                       {/* Image Thumbnail preview if image */}
                       {isImage && (
                         <div
-                          onClick={() => setSelectedAttachment(att)}
+                          onClick={() => handleOpenPreview(att)}
                           className="w-full h-24 rounded-lg bg-slate-950 overflow-hidden mb-3 border border-slate-700/60 cursor-pointer group relative"
                         >
-                          <img
-                            src={att.dataUrl}
-                            alt={att.name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
-                          />
+                          {att.dataUrl ? (
+                            <img
+                              src={att.dataUrl}
+                              alt={att.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">
+                              <ImageIcon className="w-6 h-6 opacity-40" />
+                            </div>
+                          )}
                           <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-medium gap-1">
                             <Eye className="w-3.5 h-3.5" />
                             <span>Preview</span>
@@ -273,7 +292,7 @@ export const AttachmentViewerModal: React.FC<AttachmentViewerModalProps> = ({
                       {/* PDF Preview preview button */}
                       {isPDF && (
                         <div
-                          onClick={() => setSelectedAttachment(att)}
+                          onClick={() => handleOpenPreview(att)}
                           className="w-full h-16 rounded-lg bg-slate-900 border border-slate-700/80 mb-3 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer group"
                         >
                           <div className="flex items-center gap-1.5 text-xs">

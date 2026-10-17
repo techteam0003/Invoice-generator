@@ -22,6 +22,7 @@ import {
   ExpenseAttachment
 } from '../types';
 import { DEFAULT_TAX_CONFIG } from '../constants/companyInfo';
+import { attachmentStore } from './attachmentStore';
 
 const COLLECTIONS = {
   VENDORS: 'vendors',
@@ -39,6 +40,43 @@ const STORAGE_KEYS = {
   EXPENSES: 'bk_invoice_manager_expenses_v1',
   EXPENSE_CATEGORIES: 'bk_invoice_manager_expense_categories_v1'
 };
+
+/**
+ * Safely persists data to localStorage.
+ * If quota is exceeded (common with large base64 attachments),
+ * strips bulky dataUrls while retaining metadata so operations never crash.
+ */
+export function safeLocalStorageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`[storage] LocalStorage quota exceeded on key "${key}", applying safe pruning:`, err);
+    if (key === STORAGE_KEYS.INVOICES) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          const pruned = parsed.map((inv: any) => ({
+            ...inv,
+            attachments: Array.isArray(inv.attachments)
+              ? inv.attachments.map((a: any) => ({
+                  id: a.id,
+                  name: a.name,
+                  size: a.size,
+                  type: a.type,
+                  uploadedAt: a.uploadedAt,
+                  dataUrl: '', // stripped from localStorage; loaded from memory/IndexedDB/Firestore
+                }))
+              : [],
+          }));
+          localStorage.setItem(key, JSON.stringify(pruned));
+          return;
+        }
+      } catch (innerErr) {
+        console.error('[storage] Failed to save pruned invoices to localStorage:', innerErr);
+      }
+    }
+  }
+}
 
 /**
  * Normalizes an invoice object ensuring all fields like payments, attachments, amountPaid, and balanceDue exist.
@@ -92,14 +130,33 @@ export function normalizeInvoice(data: any, id: string): Invoice {
   }
 
   const attachments: InvoiceAttachment[] = Array.isArray(data.attachments)
-    ? data.attachments.map((att: any) => ({
-        id: att.id || 'att_' + Math.random().toString(36).substring(2, 6),
-        name: att.name || 'attachment',
-        size: Number(att.size) || 0,
-        type: att.type || 'application/octet-stream',
-        dataUrl: att.dataUrl || '',
-        uploadedAt: att.uploadedAt || new Date().toISOString(),
-      }))
+    ? data.attachments.map((att: any) => {
+        const attId = att.id || 'att_' + Math.random().toString(36).substring(2, 6);
+        let dataUrl = att.dataUrl || '';
+        if (dataUrl) {
+          attachmentStore.setMemoryCache(attId, dataUrl);
+          attachmentStore.saveToIndexedDB({
+            id: attId,
+            name: att.name || 'attachment',
+            size: Number(att.size) || 0,
+            type: att.type || 'application/octet-stream',
+            dataUrl,
+            uploadedAt: att.uploadedAt || new Date().toISOString(),
+          }, id).catch(() => {});
+        } else {
+          const cached = attachmentStore.getMemoryCache(attId);
+          if (cached) dataUrl = cached;
+        }
+
+        return {
+          id: attId,
+          name: att.name || 'attachment',
+          size: Number(att.size) || 0,
+          type: att.type || 'application/octet-stream',
+          dataUrl,
+          uploadedAt: att.uploadedAt || new Date().toISOString(),
+        };
+      })
     : [];
 
   return {
@@ -297,7 +354,7 @@ export const storage = {
               }
             });
             list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(list));
+            safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(list));
             callback(list);
           }
         },
@@ -657,39 +714,103 @@ export const storage = {
   },
 
   // Invoice CRUD operations (Persists to Firestore + Local Cache)
-  saveInvoice(invoice: Omit<Invoice, 'id' | 'createdAt'>): Invoice {
+  async saveInvoice(invoice: Omit<Invoice, 'id' | 'createdAt'>): Promise<Invoice> {
     const rawId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const newInvoice = normalizeInvoice({
       ...invoice,
       createdAt: new Date().toISOString()
     }, rawId);
 
-    // Update local cache synchronously
+    // 1. Cache full attachments in memory and IndexedDB immediately
+    if (newInvoice.attachments && newInvoice.attachments.length > 0) {
+      for (const att of newInvoice.attachments) {
+        if (att.dataUrl) {
+          attachmentStore.setMemoryCache(att.id, att.dataUrl);
+          await attachmentStore.saveToIndexedDB(att, newInvoice.id).catch(() => {});
+        }
+      }
+    }
+
+    // 2. Update local cache synchronously with safe pruning if quota is reached
     const invoices = this.getInvoicesLocal();
     invoices.unshift(newInvoice);
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
-    // Persist to Firestore with sanitized payload (stripping undefined values)
-    setDoc(doc(db, COLLECTIONS.INVOICES, newInvoice.id), cleanForFirestore(newInvoice)).catch((error) => {
-      console.error('Error saving invoice to Firestore:', error);
+    // 3. Prepare clean sanitized invoice document for main collection (metadata only, keeping it under 5KB)
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(newInvoice.attachments || []);
+    const docPayload = cleanForFirestore({
+      ...newInvoice,
+      attachments: sanitizedAttachments
     });
+
+    // 4. Await Firestore save to guarantee database persistence
+    try {
+      await setDoc(doc(db, COLLECTIONS.INVOICES, newInvoice.id), docPayload);
+      console.log(`[storage] Successfully created invoice ${newInvoice.invoiceNumber} in Firestore.`);
+    } catch (error: any) {
+      console.error('[storage] Error saving invoice to Firestore:', error);
+      throw new Error(`Failed to save invoice to Firestore: ${error?.message || error}`);
+    }
+
+    // 5. Persist full attachments into Firestore subcollection with automatic chunking
+    if (newInvoice.attachments && newInvoice.attachments.length > 0) {
+      try {
+        await attachmentStore.persistAttachmentsToFirestore(newInvoice.id, newInvoice.attachments);
+        console.log(`[storage] Successfully saved ${newInvoice.attachments.length} attachments to Firestore.`);
+      } catch (err: any) {
+        console.error('[storage] Error persisting attachments subcollection:', err);
+      }
+    }
 
     return newInvoice;
   },
 
-  updateInvoice(id: string, updates: Partial<Invoice>): Invoice | null {
+  async updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice | null> {
     const invoices = this.getInvoicesLocal();
     const index = invoices.findIndex((i) => i.id === id);
     if (index === -1) return null;
     
     const merged = { ...invoices[index], ...updates };
     const updated = normalizeInvoice(merged, id);
-    invoices[index] = updated;
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
-    setDoc(doc(db, COLLECTIONS.INVOICES, id), cleanForFirestore(updated), { merge: true }).catch((error) => {
-      console.error('Error updating invoice in Firestore:', error);
+    // 1. Cache full attachments in memory and IndexedDB
+    if (updated.attachments && updated.attachments.length > 0) {
+      for (const att of updated.attachments) {
+        if (att.dataUrl) {
+          attachmentStore.setMemoryCache(att.id, att.dataUrl);
+          await attachmentStore.saveToIndexedDB(att, id).catch(() => {});
+        }
+      }
+    }
+
+    // 2. Update local cache
+    invoices[index] = updated;
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+
+    // 3. Prepare sanitized payload for main collection
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updated.attachments || []);
+    const docPayload = cleanForFirestore({
+      ...updated,
+      attachments: sanitizedAttachments
     });
+
+    // 4. Await Firestore update
+    try {
+      await setDoc(doc(db, COLLECTIONS.INVOICES, id), docPayload, { merge: true });
+      console.log(`[storage] Successfully updated invoice ${updated.invoiceNumber} in Firestore.`);
+    } catch (error: any) {
+      console.error('[storage] Error updating invoice in Firestore:', error);
+      throw new Error(`Failed to update invoice in Firestore: ${error?.message || error}`);
+    }
+
+    // 5. Persist attachments in Firestore subcollection
+    if (updated.attachments && updated.attachments.length > 0) {
+      try {
+        await attachmentStore.persistAttachmentsToFirestore(id, updated.attachments);
+      } catch (err: any) {
+        console.error('[storage] Error updating attachments subcollection:', err);
+      }
+    }
 
     return updated;
   },
@@ -865,33 +986,7 @@ export const storage = {
   },
 
   addAttachment(invoiceId: string, attachment: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>): Invoice | null {
-    const invoices = this.getInvoicesLocal();
-    const index = invoices.findIndex((i) => i.id === invoiceId);
-    if (index === -1) return null;
-
-    const invoice = invoices[index];
-    const newAttachment: InvoiceAttachment = {
-      ...attachment,
-      id: 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      uploadedAt: new Date().toISOString(),
-    };
-
-    const existingAttachments = invoice.attachments || [];
-    const updatedAttachments = [...existingAttachments, newAttachment];
-
-    const updatedInvoice: Invoice = {
-      ...invoice,
-      attachments: updatedAttachments
-    };
-
-    invoices[index] = updatedInvoice;
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
-
-    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
-      console.error('Error saving attachment to Firestore:', error);
-    });
-
-    return updatedInvoice;
+    return this.addAttachments(invoiceId, [attachment]);
   },
 
   addAttachments(invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>): Invoice | null {
@@ -907,6 +1002,14 @@ export const storage = {
       uploadedAt: new Date().toISOString(),
     }));
 
+    // Cache in memory and IndexedDB immediately
+    for (const att of newAttachments) {
+      if (att.dataUrl) {
+        attachmentStore.setMemoryCache(att.id, att.dataUrl);
+        attachmentStore.saveToIndexedDB(att, invoiceId).catch(() => {});
+      }
+    }
+
     const existingAttachments = invoice.attachments || [];
     const updatedAttachments = [...existingAttachments, ...newAttachments];
 
@@ -916,10 +1019,17 @@ export const storage = {
     };
 
     invoices[index] = updatedInvoice;
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
-    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updatedAttachments);
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
+      attachments: sanitizedAttachments
+    }), { merge: true }).catch((error) => {
       console.error('Error saving attachments to Firestore:', error);
+    });
+
+    attachmentStore.persistAttachmentsToFirestore(invoiceId, newAttachments).catch((err) => {
+      console.error('Error persisting attachment subcollection:', err);
     });
 
     return updatedInvoice;
@@ -934,26 +1044,44 @@ export const storage = {
     const existingAttachments = invoice.attachments || [];
     const updatedAttachments = existingAttachments.filter((a) => a.id !== attachmentId);
 
+    attachmentStore.deleteAttachment(invoiceId, attachmentId).catch(() => {});
+
     const updatedInvoice: Invoice = {
       ...invoice,
       attachments: updatedAttachments
     };
 
     invoices[index] = updatedInvoice;
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
-    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore(updatedInvoice), { merge: true }).catch((error) => {
+    const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updatedAttachments);
+    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
+      attachments: sanitizedAttachments
+    }), { merge: true }).catch((error) => {
       console.error('Error removing attachment from Firestore:', error);
     });
 
     return updatedInvoice;
   },
 
+  async getAttachmentDataUrl(invoiceId: string, attachmentId: string): Promise<string | null> {
+    return attachmentStore.getAttachmentDataUrl(attachmentId, invoiceId);
+  },
+
   deleteInvoice(id: string): boolean {
     const invoices = this.getInvoicesLocal();
+    const index = invoices.findIndex((i) => i.id === id);
+    if (index === -1) return false;
+
+    const inv = invoices[index];
+    if (inv.attachments && inv.attachments.length > 0) {
+      for (const att of inv.attachments) {
+        attachmentStore.deleteAttachment(id, att.id).catch(() => {});
+      }
+    }
+
     const filtered = invoices.filter((i) => i.id !== id);
-    if (filtered.length === invoices.length) return false;
-    localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(filtered));
+    safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(filtered));
 
     deleteDoc(doc(db, COLLECTIONS.INVOICES, id)).catch((error) => {
       console.error('Error deleting invoice from Firestore:', error);
