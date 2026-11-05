@@ -989,7 +989,7 @@ export const storage = {
     return this.addAttachments(invoiceId, [attachment]);
   },
 
-  addAttachments(invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>): Invoice | null {
+  async addAttachments(invoiceId: string, attachments: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>): Promise<Invoice | null> {
     if (!attachments || attachments.length === 0) return null;
     const invoices = this.getInvoicesLocal();
     const index = invoices.findIndex((i) => i.id === invoiceId);
@@ -1006,7 +1006,7 @@ export const storage = {
     for (const att of newAttachments) {
       if (att.dataUrl) {
         attachmentStore.setMemoryCache(att.id, att.dataUrl);
-        attachmentStore.saveToIndexedDB(att, invoiceId).catch(() => {});
+        await attachmentStore.saveToIndexedDB(att, invoiceId).catch(() => {});
       }
     }
 
@@ -1022,20 +1022,24 @@ export const storage = {
     safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
     const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updatedAttachments);
-    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
-      attachments: sanitizedAttachments
-    }), { merge: true }).catch((error) => {
+    try {
+      await setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
+        attachments: sanitizedAttachments
+      }), { merge: true });
+    } catch (error) {
       console.error('Error saving attachments to Firestore:', error);
-    });
+    }
 
-    attachmentStore.persistAttachmentsToFirestore(invoiceId, newAttachments).catch((err) => {
+    try {
+      await attachmentStore.persistAttachmentsToFirestore(invoiceId, newAttachments);
+    } catch (err) {
       console.error('Error persisting attachment subcollection:', err);
-    });
+    }
 
     return updatedInvoice;
   },
 
-  removeAttachment(invoiceId: string, attachmentId: string): Invoice | null {
+  async removeAttachment(invoiceId: string, attachmentId: string): Promise<Invoice | null> {
     const invoices = this.getInvoicesLocal();
     const index = invoices.findIndex((i) => i.id === invoiceId);
     if (index === -1) return null;
@@ -1044,7 +1048,7 @@ export const storage = {
     const existingAttachments = invoice.attachments || [];
     const updatedAttachments = existingAttachments.filter((a) => a.id !== attachmentId);
 
-    attachmentStore.deleteAttachment(invoiceId, attachmentId).catch(() => {});
+    await attachmentStore.deleteAttachment(invoiceId, attachmentId).catch(() => {});
 
     const updatedInvoice: Invoice = {
       ...invoice,
@@ -1055,11 +1059,13 @@ export const storage = {
     safeLocalStorageSet(STORAGE_KEYS.INVOICES, JSON.stringify(invoices));
 
     const sanitizedAttachments = attachmentStore.sanitizeForInvoiceDoc(updatedAttachments);
-    setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
-      attachments: sanitizedAttachments
-    }), { merge: true }).catch((error) => {
+    try {
+      await setDoc(doc(db, COLLECTIONS.INVOICES, invoiceId), cleanForFirestore({
+        attachments: sanitizedAttachments
+      }), { merge: true });
+    } catch (error) {
       console.error('Error removing attachment from Firestore:', error);
-    });
+    }
 
     return updatedInvoice;
   },

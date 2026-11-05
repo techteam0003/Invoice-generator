@@ -248,37 +248,52 @@ export default function App() {
     showToast(`Payment record deleted from database.`);
   };
 
-  const handleAddAttachment = (
+  const handleAddAttachment = async (
     invoiceId: string,
     attachmentData: Omit<InvoiceAttachment, 'id' | 'uploadedAt'>
   ) => {
-    const updated = storage.addAttachment(invoiceId, attachmentData);
-    setInvoices(storage.getInvoices());
-    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
-      setPreviewInvoice(updated);
+    try {
+      const updated = await storage.addAttachment(invoiceId, attachmentData);
+      setInvoices(storage.getInvoices());
+      if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+        setPreviewInvoice(updated);
+      }
+      showToast(`Attachment "${attachmentData.name}" uploaded and saved to Firestore.`);
+    } catch (err: any) {
+      console.error('Error adding attachment:', err);
+      showToast(`Failed to upload attachment: ${err?.message || 'Error'}`);
     }
-    showToast(`Attachment "${attachmentData.name}" uploaded and saved to Firestore.`);
   };
 
-  const handleAddAttachments = (
+  const handleAddAttachments = async (
     invoiceId: string,
     attachmentsData: Array<Omit<InvoiceAttachment, 'id' | 'uploadedAt'>>
   ) => {
-    const updated = storage.addAttachments(invoiceId, attachmentsData);
-    setInvoices(storage.getInvoices());
-    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
-      setPreviewInvoice(updated);
+    try {
+      const updated = await storage.addAttachments(invoiceId, attachmentsData);
+      setInvoices(storage.getInvoices());
+      if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+        setPreviewInvoice(updated);
+      }
+      showToast(`${attachmentsData.length} attachment(s) uploaded and saved to database.`);
+    } catch (err: any) {
+      console.error('Error adding attachments:', err);
+      showToast(`Failed to upload attachments: ${err?.message || 'Error'}`);
     }
-    showToast(`${attachmentsData.length} attachment(s) uploaded and saved to database.`);
   };
 
-  const handleRemoveAttachment = (invoiceId: string, attachmentId: string) => {
-    const updated = storage.removeAttachment(invoiceId, attachmentId);
-    setInvoices(storage.getInvoices());
-    if (previewInvoice && previewInvoice.id === invoiceId && updated) {
-      setPreviewInvoice(updated);
+  const handleRemoveAttachment = async (invoiceId: string, attachmentId: string) => {
+    try {
+      const updated = await storage.removeAttachment(invoiceId, attachmentId);
+      setInvoices(storage.getInvoices());
+      if (previewInvoice && previewInvoice.id === invoiceId && updated) {
+        setPreviewInvoice(updated);
+      }
+      showToast(`Attachment removed from invoice.`);
+    } catch (err: any) {
+      console.error('Error removing attachment:', err);
+      showToast(`Failed to remove attachment: ${err?.message || 'Error'}`);
     }
-    showToast(`Attachment removed from invoice.`);
   };
 
   // Expense handlers

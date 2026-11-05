@@ -1197,27 +1197,10 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                     <span className="font-mono font-semibold">${formatRawAmount(subtotal)}</span>
                   </div>
 
-                  {taxType === 'QUEBEC' ? (
-                    <>
-                      <div className="flex justify-between text-slate-400 text-[11px]">
-                        <span>• GST (5.000%):</span>
-                        <span className="font-mono">${formatRawAmount(gstAmount)}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-400 text-[11px]">
-                        <span>• QST (9.975%):</span>
-                        <span className="font-mono">${formatRawAmount(qstAmount)}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-300 pt-1 border-t border-slate-800">
-                        <span>Total Quebec Tax (14.975%):</span>
-                        <span className="font-mono font-semibold">${formatRawAmount(taxAmount)}</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex justify-between text-slate-300">
-                      <span>Tax ({effectiveTaxRate}%):</span>
-                      <span className="font-mono font-semibold">${formatRawAmount(taxAmount)}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between text-slate-300">
+                    <span>Total Tax:</span>
+                    <span className="font-mono font-semibold">${formatRawAmount(taxAmount)}</span>
+                  </div>
 
                   <div className="flex justify-between items-center pt-2 border-t-2 border-indigo-500 text-sm font-bold text-white">
                     <span>Grand Total Due:</span>
