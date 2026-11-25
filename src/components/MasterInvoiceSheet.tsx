@@ -2,6 +2,7 @@ import React from 'react';
 import { Invoice } from '../types';
 import { MASTER_COMPANY_INFO } from '../constants/companyInfo';
 import { formatDateToDisplay, formatRawAmount } from '../utils/formatters';
+import { calculateItemTaxBreakdown, roundCurrency } from '../utils/taxUtils';
 
 interface MasterInvoiceSheetProps {
   invoice: Invoice;
@@ -20,6 +21,21 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
   const amountPaid = invoice.amountPaid || 0;
   const balanceDue = invoice.balanceDue !== undefined ? invoice.balanceDue : Math.max(0, invoice.grandTotal - amountPaid);
 
+  const itemsWithTax = (invoice.items || []).map((item) => ({
+    item,
+    breakdown: calculateItemTaxBreakdown(item, invoice.taxType, invoice.taxRate),
+  }));
+
+  const summedGstAmount = roundCurrency(
+    itemsWithTax.reduce((sum, entry) => sum + entry.breakdown.gstAmount, 0)
+  );
+  const summedQstAmount = roundCurrency(
+    itemsWithTax.reduce((sum, entry) => sum + entry.breakdown.qstAmount, 0)
+  );
+  const summedTaxAmount =
+    itemsWithTax.length > 0
+      ? roundCurrency(itemsWithTax.reduce((sum, entry) => sum + entry.breakdown.taxAmount, 0))
+      : roundCurrency(invoice.taxAmount);
 
   return (
     <div
@@ -153,19 +169,19 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
               <th className="py-2.5 px-4 font-semibold text-[13px] w-auto border-r border-[#3B82F6]/30">
                 Description
               </th>
-              <th className="py-2.5 px-3 font-semibold text-[13px] text-center w-16 border-r border-[#3B82F6]/30">
+              <th className="py-2.5 px-3 font-semibold text-[13px] text-center w-14 border-r border-[#3B82F6]/30">
                 Qty
               </th>
-              <th className="py-2.5 px-4 font-semibold text-[13px] text-right w-28 border-r border-[#3B82F6]/30">
-                Rate ($)
+              <th className="py-2.5 px-3 font-semibold text-[13px] text-right w-44 border-r border-[#3B82F6]/30">
+                Tax ($)
               </th>
-              <th className="py-2.5 px-4 font-semibold text-[13px] text-right w-32">
+              <th className="py-2.5 px-4 font-semibold text-[13px] text-right w-28">
                 Amount ($)
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {(invoice.items || []).map((item, index) => (
+            {itemsWithTax.map(({ item, breakdown }, index) => (
               <tr key={item.id || index} className="text-slate-900 align-top">
                 <td className="py-3 px-4 border-r border-slate-200">
                   <div className="font-bold text-slate-900">
@@ -180,8 +196,50 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
                 <td className="py-3 px-3 text-center border-r border-slate-200 font-medium">
                   {item.quantity}
                 </td>
-                <td className="py-3 px-4 text-right border-r border-slate-200 font-medium font-mono text-[13px]">
-                  {formatRawAmount(item.rate)}
+                <td className="py-3 px-3 border-r border-slate-200 text-[11px] text-slate-600">
+                  <div className="space-y-0.5">
+                    {invoice.taxType === 'QUEBEC' ? (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span>GST ({breakdown.gstRate}%):</span>
+                          <span className="font-mono text-slate-800">
+                            ${formatRawAmount(breakdown.gstAmount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span>QST ({breakdown.qstRate}%):</span>
+                          <span className="font-mono text-slate-800">
+                            ${formatRawAmount(breakdown.qstAmount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-200 font-semibold text-slate-900">
+                          <span>Total:</span>
+                          <span className="font-mono">
+                            ${formatRawAmount(breakdown.taxAmount)}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            {invoice.taxType === 'CUSTOM'
+                              ? `Tax (${breakdown.taxRate}%):`
+                              : `HST (${breakdown.taxRate}%):`}
+                          </span>
+                          <span className="font-mono text-slate-800">
+                            ${formatRawAmount(breakdown.taxAmount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-200 font-semibold text-slate-900">
+                          <span>Total:</span>
+                          <span className="font-mono">
+                            ${formatRawAmount(breakdown.taxAmount)}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </td>
                 <td className="py-3 px-4 text-right font-medium font-mono text-[13px]">
                   {formatRawAmount(item.amount)}
@@ -196,18 +254,56 @@ export const MasterInvoiceSheet: React.FC<MasterInvoiceSheetProps> = ({
       <div id="invoice-totals-wrapper" className="pt-2 mb-8 flex justify-end">
         <div className="w-80 text-[13px] space-y-2">
           <div className="flex justify-between py-1 border-b border-slate-100">
-            <span className="font-bold text-slate-800">Subtotal:</span>
+            <span className="font-bold text-slate-800">Subtotal (Before Tax):</span>
             <span className="font-bold font-mono text-slate-900">
               ${formatRawAmount(invoice.subtotal)}
             </span>
           </div>
 
-          <div className="flex justify-between py-1 border-b border-slate-100">
-            <span className="font-bold text-slate-800">Total Tax:</span>
-            <span className="font-bold font-mono text-slate-900">
-              ${formatRawAmount(invoice.taxAmount)}
-            </span>
-          </div>
+          {/* Consolidated Tax Breakdown + Total Tax */}
+          {invoice.taxType === 'QUEBEC' ? (
+            <>
+              <div className="flex justify-between py-0.5 text-slate-700 text-[12px]">
+                <span>Total GST (5%):</span>
+                <span className="font-mono">
+                  ${formatRawAmount(summedGstAmount)}
+                </span>
+              </div>
+              <div className="flex justify-between py-0.5 text-slate-700 text-[12px]">
+                <span>Total QST (9.975%):</span>
+                <span className="font-mono">
+                  ${formatRawAmount(summedQstAmount)}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-100">
+                <span className="font-bold text-slate-800">Total Tax (14.975%):</span>
+                <span className="font-bold font-mono text-slate-900">
+                  ${formatRawAmount(summedTaxAmount)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between py-0.5 text-slate-700 text-[12px]">
+                <span>
+                  {invoice.taxType === 'CUSTOM'
+                    ? `Custom Tax (${invoice.taxRate}%):`
+                    : `Total HST (${invoice.taxRate}%):`}
+                </span>
+                <span className="font-mono">
+                  ${formatRawAmount(summedTaxAmount)}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-100">
+                <span className="font-bold text-slate-800">
+                  Total Tax ({invoice.taxRate}%):
+                </span>
+                <span className="font-bold font-mono text-slate-900">
+                  ${formatRawAmount(summedTaxAmount)}
+                </span>
+              </div>
+            </>
+          )}
 
           {/* Grand Total Bar */}
           <div

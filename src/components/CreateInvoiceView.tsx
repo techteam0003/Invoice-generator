@@ -29,6 +29,7 @@ import { Invoice, InvoiceItem, InvoiceStatus, Vendor, TaxType, TaxConfig, Paymen
 import { MasterInvoiceSheet } from './MasterInvoiceSheet';
 import { getTodayDateString, formatDateToDisplay, formatRawAmount, formatCurrency } from '../utils/formatters';
 import { optimizeImageFile, readFileAsDataUrl } from '../services/attachmentStore';
+import { calculateItemTaxBreakdown, roundCurrency } from '../utils/taxUtils';
 
 interface CreateInvoiceViewProps {
   vendors: Vendor[];
@@ -235,41 +236,47 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     );
   };
 
-  // Calculations
+  // Calculations (independently per line item, then summed for invoice totals)
+  const effectiveTaxRate = useMemo(() => {
+    if (taxType === 'QUEBEC') return 14.975;
+    if (taxType === 'CUSTOM') return Number(customTaxRate) || 0;
+    return 13.0;
+  }, [taxType, customTaxRate]);
+
+  const itemsWithTax = useMemo(() => {
+    return items.map((item) => {
+      const amount = roundCurrency((Number(item.quantity) || 0) * (Number(item.rate) || 0));
+      const breakdown = calculateItemTaxBreakdown({ amount }, taxType, effectiveTaxRate);
+      return {
+        ...item,
+        amount,
+        taxRate: breakdown.taxRate,
+        gstRate: taxType === 'QUEBEC' ? breakdown.gstRate : undefined,
+        gstAmount: taxType === 'QUEBEC' ? breakdown.gstAmount : undefined,
+        qstRate: taxType === 'QUEBEC' ? breakdown.qstRate : undefined,
+        qstAmount: taxType === 'QUEBEC' ? breakdown.qstAmount : undefined,
+        taxAmount: breakdown.taxAmount,
+      };
+    });
+  }, [items, taxType, effectiveTaxRate]);
+
   const subtotal = useMemo(() => {
-    return items.reduce((sum, item) => sum + (item.amount || 0), 0);
-  }, [items]);
+    return roundCurrency(itemsWithTax.reduce((sum, item) => sum + (item.amount || 0), 0));
+  }, [itemsWithTax]);
 
-  const { effectiveTaxRate, taxAmount, gstAmount, qstAmount, grandTotal } = useMemo(() => {
-    let rate = 13.0;
-    let gst = 0;
-    let qst = 0;
-    let tax = 0;
-
-    if (taxType === 'QUEBEC') {
-      rate = 14.975;
-      gst = Math.round(subtotal * 0.05 * 100) / 100;
-      qst = Math.round(subtotal * 0.09975 * 100) / 100;
-      tax = Math.round((gst + qst) * 100) / 100;
-    } else if (taxType === 'CUSTOM') {
-      rate = Number(customTaxRate) || 0;
-      tax = Math.round((subtotal * (rate / 100)) * 100) / 100;
-    } else {
-      // Default HST (13%)
-      rate = 13.0;
-      tax = Math.round((subtotal * (rate / 100)) * 100) / 100;
-    }
-
-    const total = Math.round((subtotal + tax) * 100) / 100;
+  const { taxAmount, gstAmount, qstAmount, grandTotal } = useMemo(() => {
+    const gst = roundCurrency(itemsWithTax.reduce((sum, item) => sum + (item.gstAmount || 0), 0));
+    const qst = roundCurrency(itemsWithTax.reduce((sum, item) => sum + (item.qstAmount || 0), 0));
+    const tax = roundCurrency(itemsWithTax.reduce((sum, item) => sum + (item.taxAmount || 0), 0));
+    const total = roundCurrency(subtotal + tax);
 
     return {
-      effectiveTaxRate: rate,
       taxAmount: tax,
       gstAmount: gst,
       qstAmount: qst,
       grandTotal: total,
     };
-  }, [subtotal, taxType, customTaxRate]);
+  }, [itemsWithTax, subtotal]);
 
   // File Upload Handlers for Attachments (Supports multiple files up to 5MB, auto-optimized)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -399,7 +406,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
         phone: selectedVendor?.phone,
         email: selectedVendor?.email,
       },
-      items,
+      items: itemsWithTax,
       subtotal,
       taxType,
       taxRate: effectiveTaxRate,
@@ -425,7 +432,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
     paymentDate,
     selectedVendorId,
     selectedVendor,
-    items,
+    itemsWithTax,
     subtotal,
     taxType,
     effectiveTaxRate,
@@ -494,14 +501,20 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
       }
     }
 
-    // Prepare clean invoice payload
-    const processedItems = items.map((item) => ({
+    // Prepare clean invoice payload with per-item independent tax breakdown
+    const processedItems = itemsWithTax.map((item) => ({
       id: item.id,
       title: item.title.trim(),
       subDetails: item.subDetails?.trim() || undefined,
       quantity: Number(item.quantity),
       rate: Number(item.rate),
-      amount: Math.round(Number(item.quantity) * Number(item.rate) * 100) / 100,
+      amount: item.amount,
+      taxRate: item.taxRate,
+      gstRate: taxType === 'QUEBEC' ? item.gstRate : undefined,
+      gstAmount: taxType === 'QUEBEC' ? item.gstAmount : undefined,
+      qstRate: taxType === 'QUEBEC' ? item.qstRate : undefined,
+      qstAmount: taxType === 'QUEBEC' ? item.qstAmount : undefined,
+      taxAmount: item.taxAmount,
     }));
 
     try {
@@ -1018,7 +1031,7 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
 
                 {/* Items List */}
                 <div className="space-y-3">
-                  {items.map((item, index) => (
+                  {itemsWithTax.map((item, index) => (
                     <div
                       key={item.id}
                       className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-3"
@@ -1103,6 +1116,53 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                           <div className="w-full px-2.5 py-1.5 text-xs text-right bg-slate-100 border border-slate-200 rounded font-mono font-bold text-slate-900">
                             ${formatRawAmount(item.amount)}
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Individual Line-Item Tax Breakdown */}
+                      <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-600">
+                          <span className="font-bold text-slate-700">
+                            Listing #{index + 1} Tax:
+                          </span>
+                          {taxType === 'QUEBEC' ? (
+                            <>
+                              <span>
+                                GST ({item.gstRate ?? 5}%):{' '}
+                                <strong className="font-mono text-slate-900">
+                                  ${formatRawAmount(item.gstAmount || 0)}
+                                </strong>
+                              </span>
+                              <span>
+                                QST ({item.qstRate ?? 9.975}%):{' '}
+                                <strong className="font-mono text-slate-900">
+                                  ${formatRawAmount(item.qstAmount || 0)}
+                                </strong>
+                              </span>
+                            </>
+                          ) : (
+                            <span>
+                              {taxType === 'CUSTOM'
+                                ? `Tax (${effectiveTaxRate}%)`
+                                : `HST (${effectiveTaxRate}%)`}
+                              :{' '}
+                              <strong className="font-mono text-slate-900">
+                                ${formatRawAmount(item.taxAmount || 0)}
+                              </strong>
+                            </span>
+                          )}
+                          <span className="text-indigo-700 font-semibold">
+                            Total Tax ({effectiveTaxRate}%):{' '}
+                            <span className="font-mono font-bold">
+                              ${formatRawAmount(item.taxAmount || 0)}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="text-slate-700 font-semibold">
+                          Line Total (incl. tax):{' '}
+                          <span className="font-mono font-bold text-slate-900">
+                            ${formatRawAmount(roundCurrency((item.amount || 0) + (item.taxAmount || 0)))}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1193,14 +1253,39 @@ export const CreateInvoiceView: React.FC<CreateInvoiceViewProps> = ({
                 {/* Totals Summary */}
                 <div className="p-4 bg-slate-900 text-white rounded-xl space-y-2 text-xs">
                   <div className="flex justify-between text-slate-300">
-                    <span>Subtotal:</span>
+                    <span>Subtotal (Before Tax):</span>
                     <span className="font-mono font-semibold">${formatRawAmount(subtotal)}</span>
                   </div>
 
-                  <div className="flex justify-between text-slate-300">
-                    <span>Total Tax:</span>
-                    <span className="font-mono font-semibold">${formatRawAmount(taxAmount)}</span>
-                  </div>
+                  {taxType === 'QUEBEC' ? (
+                    <>
+                      <div className="flex justify-between text-slate-400 text-[11px] pt-1 border-t border-slate-800">
+                        <span>• Total GST (5.000%):</span>
+                        <span className="font-mono">${formatRawAmount(gstAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400 text-[11px]">
+                        <span>• Total QST (9.975%):</span>
+                        <span className="font-mono">${formatRawAmount(qstAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-300 pt-1 border-t border-slate-800">
+                        <span>Total Tax (14.975%):</span>
+                        <span className="font-mono font-semibold">${formatRawAmount(taxAmount)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-slate-400 text-[11px] pt-1 border-t border-slate-800">
+                        <span>
+                          • {taxType === 'CUSTOM' ? `Custom Tax (${effectiveTaxRate}%)` : `Total HST (${effectiveTaxRate}%)`}:
+                        </span>
+                        <span className="font-mono">${formatRawAmount(taxAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-300 pt-1 border-t border-slate-800">
+                        <span>Total Tax ({effectiveTaxRate}%):</span>
+                        <span className="font-mono font-semibold">${formatRawAmount(taxAmount)}</span>
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex justify-between items-center pt-2 border-t-2 border-indigo-500 text-sm font-bold text-white">
                     <span>Grand Total Due:</span>

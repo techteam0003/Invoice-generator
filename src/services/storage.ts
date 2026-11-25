@@ -90,6 +90,12 @@ export function normalizeInvoice(data: any, id: string): Invoice {
         quantity: Number(it.quantity) || 1,
         rate: Number(it.rate) || 0,
         amount: Number(it.amount) || 0,
+        taxRate: it.taxRate !== undefined && it.taxRate !== null ? Number(it.taxRate) : undefined,
+        gstRate: it.gstRate !== undefined && it.gstRate !== null ? Number(it.gstRate) : undefined,
+        gstAmount: it.gstAmount !== undefined && it.gstAmount !== null ? Number(it.gstAmount) : undefined,
+        qstRate: it.qstRate !== undefined && it.qstRate !== null ? Number(it.qstRate) : undefined,
+        qstAmount: it.qstAmount !== undefined && it.qstAmount !== null ? Number(it.qstAmount) : undefined,
+        taxAmount: it.taxAmount !== undefined && it.taxAmount !== null ? Number(it.taxAmount) : undefined,
       }))
     : [];
 

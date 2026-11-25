@@ -14,6 +14,12 @@ export interface InvoiceItem {
   quantity: number;
   rate: number;
   amount: number;
+  taxRate?: number;
+  gstRate?: number;
+  gstAmount?: number;
+  qstRate?: number;
+  qstAmount?: number;
+  taxAmount?: number;
 }
 
 export type TaxType = 'HST' | 'QUEBEC' | 'CUSTOM';
